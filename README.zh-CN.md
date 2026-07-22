@@ -4,6 +4,9 @@
 
 将 Devin/Windsurf Cascade API 转换为 OpenAI 与 Anthropic 兼容接口，可供 Cherry Studio 和其他兼容客户端使用。
 
+> [!IMPORTANT]
+> 使用本项目需要有效的 Devin 或 Windsurf 订阅。本项目不提供账号、订阅或使用额度。
+
 ## 功能
 
 - OpenAI Chat Completions：`POST /v1/chat/completions`，支持流式响应

@@ -4,6 +4,9 @@ English | [简体中文](README.zh-CN.md)
 
 Expose the Devin/Windsurf Cascade API through OpenAI- and Anthropic-compatible endpoints for Cherry Studio and other compatible clients.
 
+> [!IMPORTANT]
+> An active Devin or Windsurf subscription is required. This gateway does not provide an account, subscription, or usage quota.
+
 ## Features
 
 - OpenAI Chat Completions: `POST /v1/chat/completions`, with streaming support
