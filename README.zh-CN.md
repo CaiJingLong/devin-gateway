@@ -46,19 +46,61 @@ bun run start
 
 ### 使用 Docker
 
-先在宿主机运行 `bun run login`，再启动容器：
+发布镜像支持 `linux/amd64` 和 `linux/arm64`。启动前，先在宿主机运行 `bun run login`。
+
+#### `docker run`
+
+```bash
+docker run -d \
+  --name devin-gateway \
+  --restart unless-stopped \
+  -p 127.0.0.1:3000:3000 \
+  -e DEVIN_GATEWAY_CONFIG_DIR=/config \
+  -v "$HOME/.devin-gateway:/config" \
+  ghcr.io/caijinglong/devin-gateway:0.1.0
+```
+
+该卷将宿主机的 token 目录映射到容器内的 `/config`。后续重新运行 `bun run login` 时，容器会自动加载新 token，无需重启。
+
+#### Docker Compose
+
+创建 `compose.yaml`：
+
+```yaml
+services:
+  devin-gateway:
+    image: ghcr.io/caijinglong/devin-gateway:0.1.0
+    container_name: devin-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      DEVIN_GATEWAY_CONFIG_DIR: /config
+    volumes:
+      - "${HOME}/.devin-gateway:/config"
+```
+
+拉取镜像并启动服务：
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs -f
+```
+
+停止并删除容器：
+
+```bash
+docker compose down
+```
+
+仓库内还提供用于本地构建的 `docker-compose.yml`：
 
 ```bash
 docker compose up -d --build
-docker compose ps
-```
-
-Compose 会将宿主机配置目录挂载到容器内。后续重新登录时，容器会自动加载新 token。
-
-也可以直接传入环境变量：
-
-```bash
-DEVIN_API_KEY='devin-session-token$xxxx' docker compose up -d
 ```
 
 ## 获取 Devin Token

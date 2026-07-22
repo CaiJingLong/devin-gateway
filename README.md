@@ -46,19 +46,61 @@ The gateway listens on `http://localhost:3000` by default and reads `~/.devin-ga
 
 ### Docker
 
-Sign in on the host with `bun run login`, then start the container:
+The published image supports `linux/amd64` and `linux/arm64`. Sign in on the host with `bun run login` before starting it.
+
+#### `docker run`
+
+```bash
+docker run -d \
+  --name devin-gateway \
+  --restart unless-stopped \
+  -p 127.0.0.1:3000:3000 \
+  -e DEVIN_GATEWAY_CONFIG_DIR=/config \
+  -v "$HOME/.devin-gateway:/config" \
+  ghcr.io/caijinglong/devin-gateway:0.1.0
+```
+
+The volume maps the host token directory to `/config`. A later `bun run login` updates the running container without a restart.
+
+#### Docker Compose
+
+Create `compose.yaml`:
+
+```yaml
+services:
+  devin-gateway:
+    image: ghcr.io/caijinglong/devin-gateway:0.1.0
+    container_name: devin-gateway
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PORT: "3000"
+      HOST: "0.0.0.0"
+      DEVIN_GATEWAY_CONFIG_DIR: /config
+    volumes:
+      - "${HOME}/.devin-gateway:/config"
+```
+
+Start and inspect the service:
+
+```bash
+docker compose pull
+docker compose up -d
+docker compose ps
+docker compose logs -f
+```
+
+Stop and remove the container:
+
+```bash
+docker compose down
+```
+
+The repository also includes a development `docker-compose.yml` that builds the image locally:
 
 ```bash
 docker compose up -d --build
-docker compose ps
-```
-
-Compose mounts the host configuration directory into the container. A later login updates the running container without a restart.
-
-You can also provide the token through an environment variable:
-
-```bash
-DEVIN_API_KEY='devin-session-token$xxxx' docker compose up -d
 ```
 
 ## Getting a Devin token
