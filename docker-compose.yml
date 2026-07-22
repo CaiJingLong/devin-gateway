@@ -1,0 +1,23 @@
+services:
+  devin-gateway:
+    build: .
+    ports:
+      - "127.0.0.1:${PORT:-3000}:3000"
+    environment:
+      - PORT=3000
+      - HOST=0.0.0.0
+      # Set your Devin token here, or leave empty to use config file
+      - DEVIN_API_KEY=${DEVIN_API_KEY:-}
+      # Config directory — mounted from host so CLI login outside Docker
+      # writes to the same token file the container reads.
+      - DEVIN_GATEWAY_CONFIG_DIR=${DEVIN_GATEWAY_CONFIG_DIR:-${HOME}/.devin-gateway}
+      # Optional: override Devin API base URL
+      - DEVIN_BASE_URL=${DEVIN_BASE_URL:-}
+    volumes:
+      - ${DEVIN_GATEWAY_CONFIG_DIR:-${HOME}/.devin-gateway}:${DEVIN_GATEWAY_CONFIG_DIR:-${HOME}/.devin-gateway}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3

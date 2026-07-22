@@ -1,0 +1,19 @@
+{
+  "name": "devin-gateway",
+  "version": "1.0.0",
+  "description": "Expose Devin/Windsurf Cascade API as OpenAI and Anthropic compatible endpoints",
+  "type": "module",
+  "scripts": {
+    "dev": "bun run --watch src/index.ts",
+    "start": "bun run src/index.ts",
+    "login": "bun run src/cli/login.ts",
+    "login:paste": "bun run src/cli/login.ts --paste",
+    "login:status": "bun run src/cli/login.ts --status",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5"
+  }
+}
