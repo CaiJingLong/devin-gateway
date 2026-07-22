@@ -168,3 +168,7 @@ Devin / Windsurf Cascade API
 - `src/login.ts`：OAuth PKCE 登录流程
 - `src/cli/login.ts`：CLI 登录工具
 - `src/server.ts`：HTTP 服务和兼容接口
+
+## 许可证
+
+本项目基于 [MIT License](LICENSE) 发布。

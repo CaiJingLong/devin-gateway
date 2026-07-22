@@ -2,6 +2,7 @@
   "name": "devin-gateway",
   "version": "1.0.0",
   "description": "Expose Devin/Windsurf Cascade API as OpenAI and Anthropic compatible endpoints",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "bun run --watch src/index.ts",

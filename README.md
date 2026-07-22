@@ -168,3 +168,7 @@ Key files:
 - `src/login.ts`: OAuth PKCE login flow
 - `src/cli/login.ts`: command-line login tool
 - `src/server.ts`: HTTP server and compatibility endpoints
+
+## License
+
+Released under the [MIT License](LICENSE).
