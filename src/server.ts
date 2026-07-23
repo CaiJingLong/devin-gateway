@@ -31,32 +31,21 @@ import { StopReason } from "./proto.ts";
 import { startLoginFlow, completeLoginWithUrl, type LoginSession } from "./login.ts";
 import { readToken, writeToken, watchToken } from "./config.ts";
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── Config (populated by startServer) ──────────────────────────────────────
 
-const PORT = Number(process.env.PORT ?? 3000);
-const HOST = process.env.HOST ?? "0.0.0.0";
+let PORT = 3000;
+let HOST = "0.0.0.0";
 /** If set, used as the Devin session token for all requests when the client doesn't supply one. */
-const DEFAULT_DEVIN_KEY = process.env.DEVIN_API_KEY ?? "";
+let DEFAULT_DEVIN_KEY = "";
 /** Base URL override for the Devin API (default: https://server.codeium.com). */
-const DEVIN_BASE_URL = process.env.DEVIN_BASE_URL ?? "";
-
-let storedToken = DEFAULT_DEVIN_KEY || (await readToken());
+let DEVIN_BASE_URL = "";
+let storedToken = "";
+let stopTokenWatcher: () => void = () => {};
 
 async function saveToken(token: string): Promise<void> {
   storedToken = token;
   await writeToken(token);
 }
-
-// Watch the token file so CLI logins take effect without restart.
-const stopTokenWatcher = watchToken((token) => {
-  if (token && token !== storedToken) {
-    storedToken = token;
-    console.log(`[token] Reloaded from config file (${token.slice(0, 12)}...)`);
-  } else if (!token && storedToken && !DEFAULT_DEVIN_KEY) {
-    storedToken = "";
-    console.log("[token] Config file cleared — token removed");
-  }
-});
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -779,70 +768,114 @@ async function handleLoginPaste(req: Request): Promise<Response> {
   }
 }
 
-// ─── Router ──────────────────────────────────────────────────────────────────
+// ─── Server lifecycle ───────────────────────────────────────────────────────
 
-const server = Bun.serve({
-  port: PORT,
-  hostname: HOST,
-  async fetch(req: Request): Promise<Response> {
-    const url = new URL(req.url);
-    const method = req.method;
-    const path = url.pathname;
+export interface ServerOptions {
+  /** Listening port (default: `PORT` env or `3000`). */
+  port?: number;
+  /** Listening address (default: `HOST` env or `0.0.0.0`). */
+  host?: string;
+  /** Devin session token; falls back to `DEVIN_API_KEY` env or the token file. */
+  token?: string;
+  /** Override for the Devin API base URL (default: `DEVIN_BASE_URL` env). */
+  baseUrl?: string;
+  /** Reload the token from disk when the file changes (default: `true`). */
+  watchTokenFile?: boolean;
+}
 
-    // CORS preflight
-    if (method === "OPTIONS") {
-      return new Response(null, { status: 204, headers: corsHeaders(req) });
-    }
+export interface ServerHandle {
+  port: number;
+  host: string;
+  /** Gracefully stop the server and token watcher. */
+  stop: () => Promise<void>;
+}
 
-    try {
-      // Health
-      if (path === "/health" && method === "GET") {
-        return jsonResponse(req, { status: "ok", token: storedToken ? "configured" : "not_set" });
+/**
+ * Start the HTTP gateway. Reads `PORT`/`HOST`/`DEVIN_API_KEY`/`DEVIN_BASE_URL`
+ * from the environment when the equivalent option is omitted.
+ */
+export async function startServer(options: ServerOptions = {}): Promise<ServerHandle> {
+  PORT = options.port ?? Number(process.env.PORT ?? 3000);
+  HOST = options.host ?? process.env.HOST ?? "0.0.0.0";
+  DEFAULT_DEVIN_KEY = options.token ?? process.env.DEVIN_API_KEY ?? "";
+  DEVIN_BASE_URL = options.baseUrl ?? process.env.DEVIN_BASE_URL ?? "";
+  storedToken = DEFAULT_DEVIN_KEY || (await readToken());
+
+  if (options.watchTokenFile !== false) {
+    stopTokenWatcher = watchToken((token) => {
+      if (token && token !== storedToken) {
+        storedToken = token;
+        console.log(`[token] Reloaded from config file (${token.slice(0, 12)}...)`);
+      } else if (!token && storedToken && !DEFAULT_DEVIN_KEY) {
+        storedToken = "";
+        console.log("[token] Config file cleared — token removed");
+      }
+    });
+  }
+
+  const server = Bun.serve({
+    port: PORT,
+    hostname: HOST,
+    async fetch(req: Request): Promise<Response> {
+      const url = new URL(req.url);
+      const method = req.method;
+      const path = url.pathname;
+
+      // CORS preflight
+      if (method === "OPTIONS") {
+        return new Response(null, { status: 204, headers: corsHeaders(req) });
       }
 
-      if (path === "/v1/models" && method === "GET") return await handleModels(req);
-      if (path === "/login" && method === "GET") return await handleLogin(req);
-      if (path === "/login/callback" && method === "GET") return await handleLoginCallback(req);
-      if (path === "/login/paste" && method === "POST") return await handleLoginPaste(req);
+      try {
+        // Health
+        if (path === "/health" && method === "GET") {
+          return jsonResponse(req, { status: "ok", token: storedToken ? "configured" : "not_set" });
+        }
 
-      // OpenAI
-      if (path === "/v1/chat/completions" && method === "POST") return await handleChatCompletions(req);
-      if (path === "/v1/responses" && method === "POST") return await handleResponses(req);
-      if (path === "/v1/models" && method === "GET") return handleModels(req);
+        if (path === "/v1/models" && method === "GET") return await handleModels(req);
+        if (path === "/login" && method === "GET") return await handleLogin(req);
+        if (path === "/login/callback" && method === "GET") return await handleLoginCallback(req);
+        if (path === "/login/paste" && method === "POST") return await handleLoginPaste(req);
 
-      // Anthropic
-      if (path === "/v1/messages" && method === "POST") return await handleAnthropicMessages(req);
+        // OpenAI
+        if (path === "/v1/chat/completions" && method === "POST") return await handleChatCompletions(req);
+        if (path === "/v1/responses" && method === "POST") return await handleResponses(req);
+        if (path === "/v1/models" && method === "GET") return handleModels(req);
 
-      // 404
-      return errorResponse(req, 404, `Not found: ${method} ${path}`);
-    } catch (err) {
-      return errorResponse(req, 500, String((err as Error).message ?? err));
-    }
-  },
-});
+        // Anthropic
+        if (path === "/v1/messages" && method === "POST") return await handleAnthropicMessages(req);
 
-let shutdownStarted = false;
-
-async function shutdown(): Promise<void> {
-  if (shutdownStarted) return;
-  shutdownStarted = true;
-  stopTokenWatcher();
-  await server.stop();
-}
-
-function handleShutdown(): void {
-  void shutdown().catch((error) => {
-    console.error("[shutdown] Failed to stop cleanly:", error);
-    process.exit(1);
+        // 404
+        return errorResponse(req, 404, `Not found: ${method} ${path}`);
+      } catch (err) {
+        return errorResponse(req, 500, String((err as Error).message ?? err));
+      }
+    },
   });
+
+  let shutdownStarted = false;
+  const stop = async (): Promise<void> => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+    stopTokenWatcher();
+    await server.stop();
+  };
+
+  const handleShutdown = (): void => {
+    void stop().catch((error) => {
+      console.error("[shutdown] Failed to stop cleanly:", error);
+      process.exit(1);
+    });
+  };
+  process.once("SIGTERM", handleShutdown);
+  process.once("SIGINT", handleShutdown);
+
+  console.log(`Devin Gateway running at http://${HOST}:${PORT}`);
+  console.log(`  OpenAI:    POST /v1/chat/completions, POST /v1/responses, GET /v1/models`);
+  console.log(`  Anthropic: POST /v1/messages`);
+  console.log(`  Login:     GET  /login`);
+  console.log(`  Health:    GET  /health`);
+  console.log(storedToken ? "  Token:     configured" : "  Token:     not set — visit /login or set DEVIN_API_KEY");
+
+  return { port: PORT, host: HOST, stop };
 }
-
-process.once("SIGTERM", handleShutdown);
-process.once("SIGINT", handleShutdown);
-
-console.log(`Devin Gateway running at http://${HOST}:${PORT}`);
-console.log(`  OpenAI:    POST /v1/chat/completions, POST /v1/responses, GET /v1/models`);
-console.log(`  Anthropic: POST /v1/messages`);
-console.log(`  Login:     GET  /login`);
-console.log(`  Health:    GET  /health`);
-console.log(storedToken ? "  Token:     configured" : "  Token:     not set — visit /login or set DEVIN_API_KEY");

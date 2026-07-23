@@ -188,6 +188,33 @@ curl http://localhost:3000/v1/messages \
   -d '{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+## Programmatic usage
+
+The gateway is also importable as a TypeScript library, so GitHub Actions or other scripts can call Devin directly without going through the HTTP server.
+
+```ts
+import { chat, listModels } from "devin-gateway";
+
+const { text, toolCalls, finishReason } = await chat({
+  token: process.env.DEVIN_TOKEN, // or set DEVIN_API_KEY
+  model: "claude-opus-4-8",
+  messages: [{ role: "user", content: "Summarize this PR" }],
+});
+
+for (const m of listModels()) console.log(m.id, m.contextWindow);
+```
+
+Importing the package does **not** start the server. To run the server programmatically:
+
+```ts
+import { startServer } from "devin-gateway";
+const handle = await startServer({ port: 3000 });
+// ... later
+await handle.stop();
+```
+
+`chat()` only needs the Bun runtime when reading the token file; pass `token` explicitly and it runs under plain Node.js too, which makes it suitable for GitHub Actions runners. Lower-level building blocks (`streamChat`, `discoverModels`, `getUserJwt`, converters, model catalog) are all re-exported from the package entry point.
+
 ## Architecture
 
 ```text
@@ -210,6 +237,8 @@ Key files:
 - `src/login.ts`: OAuth PKCE login flow
 - `src/cli/login.ts`: command-line login tool
 - `src/server.ts`: HTTP server and compatibility endpoints
+- `src/client.ts`: high-level `chat()` client for programmatic/Actions use
+- `src/index.ts`: public entry point — re-exports the API, starts the server when run directly
 
 ## License
 

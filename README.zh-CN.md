@@ -188,6 +188,33 @@ curl http://localhost:3000/v1/messages \
   -d '{"model":"claude-opus-4-8","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+## 以库的形式调用
+
+本网关也可作为 TypeScript 库直接导入，GitHub Actions 等脚本无需经过 HTTP 服务即可直接调用 Devin。
+
+```ts
+import { chat, listModels } from "devin-gateway";
+
+const { text, toolCalls, finishReason } = await chat({
+  token: process.env.DEVIN_TOKEN, // 或设置 DEVIN_API_KEY
+  model: "claude-opus-4-8",
+  messages: [{ role: "user", content: "总结这个 PR" }],
+});
+
+for (const m of listModels()) console.log(m.id, m.contextWindow);
+```
+
+导入本包**不会**启动服务。如需以编程方式启动服务：
+
+```ts
+import { startServer } from "devin-gateway";
+const handle = await startServer({ port: 3000 });
+// ... 用完之后
+await handle.stop();
+```
+
+`chat()` 仅在读取 token 文件时依赖 Bun 运行时；显式传入 `token` 后即可在纯 Node.js 下运行，适合 GitHub Actions runner。底层能力（`streamChat`、`discoverModels`、`getUserJwt`、格式转换、模型目录）均从包入口重新导出。
+
 ## 架构
 
 ```text
@@ -210,6 +237,8 @@ Devin / Windsurf Cascade API
 - `src/login.ts`：OAuth PKCE 登录流程
 - `src/cli/login.ts`：CLI 登录工具
 - `src/server.ts`：HTTP 服务和兼容接口
+- `src/client.ts`：高层 `chat()` 客户端，供编程调用或 Actions 使用
+- `src/index.ts`：公共入口，重新导出 API，直接运行时启动服务
 
 ## 许可证
 

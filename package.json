@@ -4,6 +4,22 @@
   "description": "Expose Devin/Windsurf Cascade API as OpenAI and Anthropic compatible endpoints",
   "license": "MIT",
   "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./proto": "./src/proto.ts",
+    "./models": "./src/models.ts",
+    "./convert": "./src/convert.ts",
+    "./config": "./src/config.ts",
+    "./devin": "./src/devin.ts",
+    "./client": "./src/client.ts",
+    "./server": "./src/server.ts"
+  },
+  "files": ["src"],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
