@@ -144,14 +144,14 @@ Set `DEVIN_API_KEY`. It takes precedence over the token file.
 The built-in catalog covers Claude, GPT, Gemini, GLM, Grok, Kimi, DeepSeek, SWE, and related model families.
 
 ```bash
-# Built-in model catalog
+# Current models reported by the Devin API; requires a valid token
 curl http://localhost:3000/v1/models
 
-# Current models reported by the Devin API; requires a valid token
-curl 'http://localhost:3000/v1/models?source=remote'
+# Built-in snapshot bundled with this gateway
+curl 'http://localhost:3000/v1/models?source=local'
 ```
 
-> **Note**: The table below is a snapshot of the built-in catalog at the time shown. Devin's available models change at any time, so this list is **for reference only and is not a constraint on the workflow** — `model` accepts any raw Cascade UID and passes unknown UIDs straight through. For the live list, query `GET /v1/models?source=remote`.
+> **Note**: `/v1/models` loads the live Devin catalog by default; `?source=remote` is an explicit equivalent. The table below is a snapshot of the built-in catalog at the time shown. Devin's available models change at any time, so this list is **for reference only and is not a constraint on the workflow** — `model` accepts any raw Cascade UID and passes unknown UIDs straight through. Use `GET /v1/models` for the live list.
 
 **Snapshot time: 2026-07-23**
 

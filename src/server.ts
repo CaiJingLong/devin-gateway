@@ -665,8 +665,8 @@ async function handleModels(req: Request): Promise<Response> {
   const url = new URL(req.url);
   const source = url.searchParams.get("source");
 
-  // Static catalog by default; ?source=remote queries the live Devin API.
-  if (source !== "remote") {
+  // Remote discovery by default; ?source=local explicitly selects the built-in catalog.
+  if (source === "local") {
     const models = listModels();
     return jsonResponse(req, {
       object: "list",
