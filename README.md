@@ -151,6 +151,61 @@ curl http://localhost:3000/v1/models
 curl 'http://localhost:3000/v1/models?source=remote'
 ```
 
+> **Note**: The table below is a snapshot of the built-in catalog at the time shown. Devin's available models change at any time, so this list is **for reference only and is not a constraint on the workflow** — `model` accepts any raw Cascade UID and passes unknown UIDs straight through. For the live list, query `GET /v1/models?source=remote`.
+
+**Snapshot time: 2026-07-23**
+
+| Model id | Name | Context window | Max tokens | Effort levels |
+| --- | --- | --- | --- | --- |
+| `claude-5-fable-low` | Claude Fable 5 Low | 1,000,000 | 64,000 | — |
+| `claude-5-fable-medium` | Claude Fable 5 Medium | 1,000,000 | 64,000 | — |
+| `claude-5-fable-high` | Claude Fable 5 High | 1,000,000 | 64,000 | — |
+| `claude-5-fable-xhigh` | Claude Fable 5 XHigh | 1,000,000 | 64,000 | — |
+| `claude-5-fable-max` | Claude Fable 5 Max | 1,000,000 | 64,000 | — |
+| `claude-opus-4-6` | Claude Opus 4.6 | 200,000 | 64,000 | — |
+| `claude-opus-4-6-1m` | Claude Opus 4.6 1M | 1,000,000 | 64,000 | — |
+| `claude-opus-4-7` | Claude Opus 4.7 | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-7-fast` | Claude Opus 4.7 Fast | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-8` | Claude Opus 4.8 | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-8-fast` | Claude Opus 4.8 Fast | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | 200,000 | 64,000 | — |
+| `claude-sonnet-4-6-1m` | Claude Sonnet 4.6 1M | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-low` | Claude Sonnet 5 Low | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-medium` | Claude Sonnet 5 Medium | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-high` | Claude Sonnet 5 High | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-xhigh` | Claude Sonnet 5 XHigh | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-max` | Claude Sonnet 5 Max | 1,000,000 | 64,000 | — |
+| `deepseek-v4` | DeepSeek V4 Pro | 1,048,576 | 64,000 | — |
+| `gemini-3-1-pro` | Gemini 3.1 Pro | 1,048,576 | 64,000 | — |
+| `gemini-3-5-flash` | Gemini 3.5 Flash | 1,048,576 | 64,000 | — |
+| `gemini-3-flash` | Gemini 3 Flash | 1,048,576 | 64,000 | — |
+| `glm-5-2` | GLM-5.2 | 200,000 | 64,000 | low/medium/high/xhigh/max |
+| `glm-5-2-1m` | GLM-5.2 1M | 1,000,000 | 64,000 | — |
+| `gpt-5-2` | GPT-5.2 | 384,000 | 64,000 | — |
+| `gpt-5-3-codex` | GPT-5.3 Codex | 400,000 | 64,000 | — |
+| `gpt-5-3-codex-fast` | GPT-5.3 Codex Fast | 400,000 | 64,000 | — |
+| `gpt-5-4` | GPT-5.4 | 272,000 | 64,000 | — |
+| `gpt-5-4-fast` | GPT-5.4 Fast | 272,000 | 64,000 | — |
+| `gpt-5-4-mini` | GPT-5.4 Mini | 400,000 | 64,000 | — |
+| `gpt-5-5` | GPT-5.5 | 272,000 | 64,000 | — |
+| `gpt-5-5-fast` | GPT-5.5 Fast | 272,000 | 64,000 | — |
+| `gpt-5-6-luna` | GPT-5.6 Luna | 1,000,000 | 64,000 | — |
+| `gpt-5-6-luna-fast` | GPT-5.6 Luna Fast | 1,000,000 | 64,000 | — |
+| `gpt-5-6-sol` | GPT-5.6 Sol | 1,000,000 | 64,000 | — |
+| `gpt-5-6-sol-fast` | GPT-5.6 Sol Fast | 1,000,000 | 64,000 | — |
+| `gpt-5-6-terra` | GPT-5.6 Terra | 1,000,000 | 64,000 | — |
+| `gpt-5-6-terra-fast` | GPT-5.6 Terra Fast | 1,000,000 | 64,000 | — |
+| `grok-4-5-low` | Grok 4.5 Low | 500,000 | 64,000 | — |
+| `grok-4-5-medium` | Grok 4.5 Medium | 500,000 | 64,000 | — |
+| `grok-4-5-high` | Grok 4.5 High | 500,000 | 64,000 | — |
+| `kimi-k2-6` | Kimi K2.6 | 262,144 | 64,000 | — |
+| `kimi-k2-7` | Kimi K2.7 | 262,144 | 64,000 | — |
+| `nemotron-3-ultra-nvfp4` | Nemotron 3 Ultra | 262,144 | 64,000 | — |
+| `swe-1-6` | SWE-1.6 | 200,000 | 64,000 | — |
+| `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 64,000 | — |
+| `swe-1-7` | SWE-1.7 Max | 262,000 | 64,000 | — |
+| `swe-1-7-lightning` | SWE-1.7 Lightning | 202,752 | 64,000 | — |
+
 ## Configuration
 
 | Variable | Default | Description |
@@ -214,6 +269,12 @@ await handle.stop();
 ```
 
 `chat()` only needs the Bun runtime when reading the token file; pass `token` explicitly and it runs under plain Node.js too, which makes it suitable for GitHub Actions runners. Lower-level building blocks (`streamChat`, `discoverModels`, `getUserJwt`, converters, model catalog) are all re-exported from the package entry point.
+
+## GitHub Actions
+
+A reusable workflow at `.github/workflows/devin-chat.yml` turns Devin into a model provider for any repository's CI — no HTTP server, no port management. Pass the token via `secrets` and the prompt via `with`, then read the reply from job outputs.
+
+See **[docs/github-actions.md](docs/github-actions.md)** for the full guide: inputs, outputs, secret setup, and ready-to-use examples (PR review, commit message generation, multi-step pipelines).
 
 ## Architecture
 

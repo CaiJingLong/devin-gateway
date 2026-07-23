@@ -151,6 +151,61 @@ curl http://localhost:3000/v1/models
 curl 'http://localhost:3000/v1/models?source=remote'
 ```
 
+> **注意**：下表是内置目录在所标时间的快照。Devin 可用模型随时可能变动，因此本列表**仅供参考，不作为 workflow 的约束**——`model` 接受任意原始 Cascade UID，未知 UID 会直通给 Devin API。如需实时列表，请查询 `GET /v1/models?source=remote`。
+
+**快照时间：2026-07-23**
+
+| 模型 id | 名称 | 上下文窗口 | 最大输出 | 推理强度 |
+| --- | --- | --- | --- | --- |
+| `claude-5-fable-low` | Claude Fable 5 Low | 1,000,000 | 64,000 | — |
+| `claude-5-fable-medium` | Claude Fable 5 Medium | 1,000,000 | 64,000 | — |
+| `claude-5-fable-high` | Claude Fable 5 High | 1,000,000 | 64,000 | — |
+| `claude-5-fable-xhigh` | Claude Fable 5 XHigh | 1,000,000 | 64,000 | — |
+| `claude-5-fable-max` | Claude Fable 5 Max | 1,000,000 | 64,000 | — |
+| `claude-opus-4-6` | Claude Opus 4.6 | 200,000 | 64,000 | — |
+| `claude-opus-4-6-1m` | Claude Opus 4.6 1M | 1,000,000 | 64,000 | — |
+| `claude-opus-4-7` | Claude Opus 4.7 | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-7-fast` | Claude Opus 4.7 Fast | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-8` | Claude Opus 4.8 | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-opus-4-8-fast` | Claude Opus 4.8 Fast | 1,000,000 | 64,000 | low/medium/high/xhigh/max |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | 200,000 | 64,000 | — |
+| `claude-sonnet-4-6-1m` | Claude Sonnet 4.6 1M | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-low` | Claude Sonnet 5 Low | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-medium` | Claude Sonnet 5 Medium | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-high` | Claude Sonnet 5 High | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-xhigh` | Claude Sonnet 5 XHigh | 1,000,000 | 64,000 | — |
+| `claude-sonnet-5-max` | Claude Sonnet 5 Max | 1,000,000 | 64,000 | — |
+| `deepseek-v4` | DeepSeek V4 Pro | 1,048,576 | 64,000 | — |
+| `gemini-3-1-pro` | Gemini 3.1 Pro | 1,048,576 | 64,000 | — |
+| `gemini-3-5-flash` | Gemini 3.5 Flash | 1,048,576 | 64,000 | — |
+| `gemini-3-flash` | Gemini 3 Flash | 1,048,576 | 64,000 | — |
+| `glm-5-2` | GLM-5.2 | 200,000 | 64,000 | low/medium/high/xhigh/max |
+| `glm-5-2-1m` | GLM-5.2 1M | 1,000,000 | 64,000 | — |
+| `gpt-5-2` | GPT-5.2 | 384,000 | 64,000 | — |
+| `gpt-5-3-codex` | GPT-5.3 Codex | 400,000 | 64,000 | — |
+| `gpt-5-3-codex-fast` | GPT-5.3 Codex Fast | 400,000 | 64,000 | — |
+| `gpt-5-4` | GPT-5.4 | 272,000 | 64,000 | — |
+| `gpt-5-4-fast` | GPT-5.4 Fast | 272,000 | 64,000 | — |
+| `gpt-5-4-mini` | GPT-5.4 Mini | 400,000 | 64,000 | — |
+| `gpt-5-5` | GPT-5.5 | 272,000 | 64,000 | — |
+| `gpt-5-5-fast` | GPT-5.5 Fast | 272,000 | 64,000 | — |
+| `gpt-5-6-luna` | GPT-5.6 Luna | 1,000,000 | 64,000 | — |
+| `gpt-5-6-luna-fast` | GPT-5.6 Luna Fast | 1,000,000 | 64,000 | — |
+| `gpt-5-6-sol` | GPT-5.6 Sol | 1,000,000 | 64,000 | — |
+| `gpt-5-6-sol-fast` | GPT-5.6 Sol Fast | 1,000,000 | 64,000 | — |
+| `gpt-5-6-terra` | GPT-5.6 Terra | 1,000,000 | 64,000 | — |
+| `gpt-5-6-terra-fast` | GPT-5.6 Terra Fast | 1,000,000 | 64,000 | — |
+| `grok-4-5-low` | Grok 4.5 Low | 500,000 | 64,000 | — |
+| `grok-4-5-medium` | Grok 4.5 Medium | 500,000 | 64,000 | — |
+| `grok-4-5-high` | Grok 4.5 High | 500,000 | 64,000 | — |
+| `kimi-k2-6` | Kimi K2.6 | 262,144 | 64,000 | — |
+| `kimi-k2-7` | Kimi K2.7 | 262,144 | 64,000 | — |
+| `nemotron-3-ultra-nvfp4` | Nemotron 3 Ultra | 262,144 | 64,000 | — |
+| `swe-1-6` | SWE-1.6 | 200,000 | 64,000 | — |
+| `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 64,000 | — |
+| `swe-1-7` | SWE-1.7 Max | 262,000 | 64,000 | — |
+| `swe-1-7-lightning` | SWE-1.7 Lightning | 202,752 | 64,000 | — |
+
 ## 配置
 
 | 变量 | 默认值 | 说明 |
@@ -214,6 +269,12 @@ await handle.stop();
 ```
 
 `chat()` 仅在读取 token 文件时依赖 Bun 运行时；显式传入 `token` 后即可在纯 Node.js 下运行，适合 GitHub Actions runner。底层能力（`streamChat`、`discoverModels`、`getUserJwt`、格式转换、模型目录）均从包入口重新导出。
+
+## GitHub Actions
+
+仓库内置可复用 workflow `.github/workflows/devin-chat.yml`，把 Devin 当作 model provider 接入任意仓库的 CI——不启动 HTTP 服务、不管端口。token 通过 `secrets` 传入，提示词通过 `with` 传入，回复从 job 输出读取。
+
+完整说明见 **[docs/github-actions.md](docs/github-actions.md)**：输入输出、secret 配置、以及开箱即用的示例（PR 审查、commit message 生成、多步串联）。
 
 ## 架构
 

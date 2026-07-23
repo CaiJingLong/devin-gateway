@@ -65,7 +65,11 @@ const MODELS: ModelInfo[] = [
     id: "gemini-3-flash", name: "Gemini 3 Flash", contextWindow: 1_048_576, maxTokens: 64_000, reasoning: true,
     requestModelId: "MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL",
   },
-  { id: "glm-5-2", name: "GLM-5.2", contextWindow: 200_000, maxTokens: 64_000, reasoning: true },
+  {
+    id: "glm-5-2", name: "GLM-5.2", contextWindow: 200_000, maxTokens: 64_000, reasoning: true,
+    requestModelId: "glm-5-2-low",
+    effortRouting: { low: "glm-5-2-low", medium: "glm-5-2-medium", high: "glm-5-2-high", xhigh: "glm-5-2-xhigh", max: "glm-5-2-max" },
+  },
   { id: "glm-5-2-1m", name: "GLM-5.2 1M", contextWindow: 1_000_000, maxTokens: 64_000, reasoning: true, requestModelId: "glm-5-2-none-1m" },
   {
     id: "gpt-5-2", name: "GPT-5.2", contextWindow: 384_000, maxTokens: 64_000, reasoning: true,

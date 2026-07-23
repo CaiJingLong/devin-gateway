@@ -1,0 +1,96 @@
+name: Devin Chat
+
+# Reusable workflow: call Devin/Cascade as a model provider from any workflow.
+# Returns the model response via the `response` job output.
+#
+# Caller example:
+#
+#   jobs:
+#     ask-devin:
+#       uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+#       secrets:
+#         DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
+#       with:
+#         prompt: "Summarize the diff in three bullets"
+#         model: "claude-opus-4-8"
+#     use:
+#       needs: ask-devin
+#       runs-on: ubuntu-latest
+#       steps:
+#         - run: echo "${{ needs.ask-devin.outputs.response }}"
+
+on:
+  workflow_call:
+    inputs:
+      prompt:
+        description: "User prompt sent to the model"
+        required: true
+        type: string
+      system:
+        description: "Optional system prompt"
+        required: false
+        type: string
+        default: ""
+      model:
+        description: "Model id (e.g. glm-5-2) or raw Cascade UID"
+        required: false
+        type: string
+        default: "glm-5-2"
+      effort:
+        description: "Reasoning effort, routed via the model's effortRouting map"
+        required: false
+        type: string
+        default: "high"
+      max-tokens:
+        description: "Max output tokens"
+        required: false
+        type: number
+        default: 0
+      temperature:
+        description: "Sampling temperature"
+        required: false
+        type: number
+        default: 0
+      top-p:
+        description: "Top-p nucleus sampling"
+        required: false
+        type: number
+        default: 0
+      base-url:
+        description: "Override Devin API base URL"
+        required: false
+        type: string
+        default: ""
+    secrets:
+      DEVIN_TOKEN:
+        description: "Devin session token (devin-session-token$...)"
+        required: true
+
+jobs:
+  chat:
+    runs-on: ubuntu-latest
+    outputs:
+      response: ${{ steps.chat.outputs.response }}
+      finish_reason: ${{ steps.chat.outputs.finish_reason }}
+    steps:
+      - name: Checkout gateway
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Run Devin chat
+        id: chat
+        run: bun run scripts/chat.ts
+        env:
+          DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
+          INPUT_PROMPT: ${{ inputs.prompt }}
+          INPUT_SYSTEM: ${{ inputs.system }}
+          INPUT_MODEL: ${{ inputs.model }}
+          INPUT_EFFORT: ${{ inputs.effort }}
+          INPUT_MAX_TOKENS: ${{ inputs.max-tokens }}
+          INPUT_TEMPERATURE: ${{ inputs.temperature }}
+          INPUT_TOP_P: ${{ inputs.top-p }}
+          INPUT_BASE_URL: ${{ inputs.base-url }}
