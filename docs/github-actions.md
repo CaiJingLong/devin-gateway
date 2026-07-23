@@ -1,35 +1,35 @@
-# GitHub Actions 用法
+# GitHub Actions
 
-本仓库提供一个可复用 workflow `.github/workflows/devin-chat.yml`，把 Devin/Windsurf Cascade 当作 model provider，在任意仓库的 CI 里直接调用。调用方无需自己装 Bun、写脚本或起 HTTP 服务——workflow 内部会检出本仓库、安装 Bun、运行 `scripts/chat.ts` 并把模型回复回传为 job output。
+This repo ships a reusable workflow, `.github/workflows/devin-chat.yml`, that turns Devin/Windsurf Cascade into a model provider you can call from any repository's CI. Callers don't need to install Bun, write scripts, or run an HTTP server — the workflow checks out this repo, sets up Bun, runs `scripts/chat.ts`, and surfaces the model's reply as a job output.
 
-## 工作原理
+## How it works
 
 ```
-调用方 workflow
+Caller workflow
     │  uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@<ref>
     │  secrets: DEVIN_TOKEN
     │  with:   prompt / model / effort / ...
     ▼
 devin-chat.yml (reusable workflow)
-    │  checkout 本仓库 → setup-bun → bun run scripts/chat.ts
+    │  checkout this repo → setup-bun → bun run scripts/chat.ts
     ▼
 scripts/chat.ts → chat() → Devin/Cascade API
-    │  回复写入 $GITHUB_OUTPUT (response, finish_reason)
+    │  reply written to $GITHUB_OUTPUT (response, finish_reason)
     ▼
-调用方通过 needs.<job>.outputs.response 消费
+Caller consumes via needs.<job>.outputs.response
 ```
 
-不启动 HTTP server，不占端口，单次调用即返回。`chat()` 显式传入 token 时不依赖 Bun 文件 API，适合 Actions runner。
+No HTTP server is started, no port is bound, and each call returns in one shot. `chat()` doesn't touch Bun-specific file APIs when the token is passed explicitly, so it runs fine on an Actions runner.
 
-## 前置准备
+## Prerequisites
 
-### 1. 获取 Devin token
+### 1. Obtain a Devin token
 
-workflow 需要的是 token 的**完整字符串值**（形如 `devin-session-token$xxxx...`），用来填入 GitHub secret。以下任一方式均可获取，按你的环境选择。
+The workflow needs the **full string value** of the token (shaped like `devin-session-token$xxxx...`) to put into a GitHub secret. Pick whichever method fits your environment.
 
-> 需要有效的 Devin 或 Windsurf 订阅。本网关不提供账号或额度。
+> An active Devin or Windsurf subscription is required. This gateway provides no account, subscription, or usage quota.
 
-#### 方式 A：本地浏览器登录（推荐，有桌面环境）
+#### Option A: Local browser login (recommended, desktop environment)
 
 ```bash
 git clone https://github.com/caijinglong/devin-gateway.git
@@ -38,87 +38,87 @@ bun install
 bun run login
 ```
 
-浏览器自动打开完成 OAuth，token 写入 `~/.devin-gateway/token`。读取字符串值：
+A browser opens automatically to complete OAuth; the token is written to `~/.devin-gateway/token`. Read the string value:
 
 ```bash
 cat ~/.devin-gateway/token
 ```
 
-或登录时直接打印不落盘：
+Or print it without saving to disk:
 
 ```bash
 bun run login -- --print
 ```
 
-#### 方式 B：粘贴回调 URL（SSH / 无浏览器 / 远程机器）
+#### Option B: Paste the callback URL (SSH / headless / remote)
 
-本机无法接收浏览器回调时（SSH、容器、无头服务器），用 paste 模式手动粘贴：
+When the machine can't receive a browser callback (SSH, container, headless server), use paste mode to paste it manually:
 
 ```bash
 bun run login:paste
 ```
 
-按提示打开打印出的 auth URL，在浏览器完成登录后，把地址栏里的回调 URL（形如 `http://127.0.0.1:59653/callback?code=...&state=...`）粘贴回终端。同样可加 `--print` 只打印 token：
+Open the printed auth URL, complete sign-in in the browser, then paste the callback URL from the address bar (shaped like `http://127.0.0.1:59653/callback?code=...&state=...`) back into the terminal. Add `--print` to only print the token:
 
 ```bash
 bun run login:paste -- --print
 ```
 
-#### 方式 C：Web 登录（已在本机跑着 gateway）
+#### Option C: Web login (gateway already running locally)
 
-启动服务后浏览器打开 `http://localhost:3000/login`，完成授权后 token 写入同一文件。若回调无法到达本机（远程部署），页面上有粘贴框，把回调 URL 粘进去即可。
+Start the server and open `http://localhost:3000/login` in a browser. After authorization the token is written to the same file. If the callback can't reach your machine (remote deployment), the page has a paste form — paste the callback URL there.
 
-#### 方式 D：检查现有 token
+#### Option D: Inspect an existing token
 
 ```bash
-bun run login:status     # 显示 token 状态（前缀 + 是否存在）
-cat ~/.devin-gateway/token   # 直接读出完整值
+bun run login:status     # shows token status (prefix + presence)
+cat ~/.devin-gateway/token   # read the full value directly
 ```
 
-#### 关于 DEVIN_API_KEY 环境变量
+#### About the DEVIN_API_KEY env var
 
-`DEVIN_API_KEY` 是给 gateway 服务端用的优先级覆盖项，**不是获取 token 的方式**。workflow 调用的是 `chat()`，它读 `DEVIN_TOKEN`（脚本入参）或 `DEVIN_API_KEY` 环境变量——但在 Actions 里应通过 `secrets.DEVIN_TOKEN` 传入，不要用环境变量明文。
+`DEVIN_API_KEY` is a server-side override for the gateway — it is **not** a way to obtain a token. The workflow calls `chat()`, which reads `DEVIN_TOKEN` (the script input) or the `DEVIN_API_KEY` env var — but in Actions you should pass it via `secrets.DEVIN_TOKEN`, never as a plaintext env var.
 
-### 2. 在调用方仓库配置 secret
+### 2. Configure the secret in the calling repo
 
-进入调用方仓库 → Settings → Secrets and variables → Actions → New repository secret：
+In the calling repo, go to Settings → Secrets and variables → Actions → New repository secret:
 
 - Name: `DEVIN_TOKEN`
-- Value: 上一步拿到的完整 token（含 `devin-session-token$` 前缀）
+- Value: the full token from the previous step (including the `devin-session-token$` prefix)
 
-组织级 secret 同样可用。建议用细粒度 token 并定期轮换。
+Organization-level secrets work too. Rotate the token periodically.
 
-### 3. 固定 workflow ref
+### 3. Pin the workflow ref
 
-`uses:` 里的 `@<ref>` 建议固定到具体 tag（如 `@v0.1.0`）或 commit SHA，避免上游变更意外影响你的 CI。`@main` 可用于前期调试，不建议长期使用。
+Pin `@<ref>` in `uses:` to a specific tag (e.g. `@v0.1.0`) or commit SHA so upstream changes don't surprise your CI. `@main` is fine for early experimentation but not recommended long-term.
 
-## 输入参数
+## Inputs
 
-| 参数 | 类型 | 必填 | 默认 | 说明 |
+| Input | Type | Required | Default | Description |
 | --- | --- | --- | --- | --- |
-| `prompt` | string | 是 | — | 用户提示词 |
-| `system` | string | 否 | `""` | 系统提示词 |
-| `model` | string | 否 | `glm-5-2` | 模型 id 或原始 Cascade UID，见 [模型列表](../README.md#模型列表) |
-| `effort` | string | 否 | `high` | 推理强度，经模型 `effortRouting` 路由；仅对带 effort 路由的模型生效 |
-| `max-tokens` | number | 否 | `0` | 最大输出 token，`0` 表示用服务端默认 |
-| `temperature` | number | 否 | `0` | 采样温度，`0` 表示用服务端默认 |
-| `top-p` | number | 否 | `0` | top-p，`0` 表示用服务端默认 |
-| `base-url` | string | 否 | `""` | 覆盖 Devin API base URL，留空用默认 |
+| `prompt` | string | yes | — | User prompt |
+| `system` | string | no | `""` | System prompt |
+| `model` | string | no | `glm-5-2` | Model id or raw Cascade UID; see [Models](../README.md#models) |
+| `effort` | string | no | `high` | Reasoning effort, routed via the model's `effortRouting`; only affects models with effort routing |
+| `max-tokens` | number | no | `0` | Max output tokens; `0` uses the server default |
+| `temperature` | number | no | `0` | Sampling temperature; `0` uses the server default |
+| `top-p` | number | no | `0` | Top-p; `0` uses the server default |
+| `base-url` | string | no | `""` | Override the Devin API base URL; empty uses the default |
 
-### secret
+### Secret
 
-| secret | 必填 | 说明 |
+| Secret | Required | Description |
 | --- | --- | --- |
-| `DEVIN_TOKEN` | 是 | Devin session token（`devin-session-token$...`） |
+| `DEVIN_TOKEN` | yes | Devin session token (`devin-session-token$...`) |
 
-## 输出
+## Outputs
 
-| output | 说明 |
+| Output | Description |
 | --- | --- |
-| `response` | 模型回复文本（可能多行，已用 delimiter 安全编码） |
-| `finish_reason` | OpenAI 风格的结束原因（`stop` / `tool_calls` / ...） |
+| `response` | Model reply text (may be multi-line; encoded with a delimiter for safety) |
+| `finish_reason` | OpenAI-style finish reason (`stop` / `tool_calls` / ...) |
 
-## 最小示例
+## Minimal example
 
 ```yaml
 name: Ask Devin
@@ -133,7 +133,7 @@ jobs:
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
-      prompt: "用一句话总结这个 PR 的改动"
+      prompt: "Summarize this PR's changes in one sentence"
 
   echo:
     needs: ask-devin
@@ -142,11 +142,11 @@ jobs:
       - run: echo "${{ needs.ask-devin.outputs.response }}"
 ```
 
-## 实战示例
+## Real-world examples
 
-### PR 代码审查
+### PR code review
 
-在 PR 打开时让模型审查 diff，并把结果评论到 PR 上。需要 `pull-requests: write` 权限。
+Have the model review the diff when a PR opens and comment the result on the PR. Requires `pull-requests: write`.
 
 ```yaml
 name: Devin PR review
@@ -165,11 +165,11 @@ jobs:
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
-      system: "你是资深代码审查者，用中文输出。"
+      system: "You are a senior code reviewer. Be concise."
       prompt: |
-        审查以下 PR diff，指出潜在 bug、风险和改进点，分条列出。
-        仓库：${{ github.event.pull_request.head.repo.full_name }}
-        PR #${{ github.event.pull_request.number }}：${{ github.event.pull_request.title }}
+        Review the following PR diff. List potential bugs, risks, and improvements.
+        Repo: ${{ github.event.pull_request.head.repo.full_name }}
+        PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}
         ${{
           github.event.pull_request.body
         }}
@@ -187,13 +187,13 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: `### Devin 审查\n\n${{ needs.review.outputs.response }}`,
+              body: `### Devin review\n\n${{ needs.review.outputs.response }}`,
             });
 ```
 
-### 生成 commit message
+### Generate a commit message
 
-在 push 时根据 diff 生成 conventional commit message。
+Generate a Conventional Commits message from a diff.
 
 ```yaml
 name: Devin commit message
@@ -207,13 +207,13 @@ jobs:
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
-      system: "输出 Conventional Commits 格式，仅一行标题 + 可选正文，不要多余解释。"
-      prompt: "为以下改动生成 commit message：\n\n${{ vars.RECENT_DIFF }}"
+      system: "Output Conventional Commits format: one-line subject + optional body. No extra explanation."
+      prompt: "Generate a commit message for these changes:\n\n${{ vars.RECENT_DIFF }}"
       model: "glm-5-2"
       effort: "medium"
 ```
 
-### 手动触发 + 自定义模型
+### Manual trigger with a custom model
 
 ```yaml
 name: Devin on demand
@@ -222,7 +222,7 @@ on:
   workflow_dispatch:
     inputs:
       question:
-        description: "问题"
+        description: "Question"
         required: true
 
 jobs:
@@ -237,7 +237,7 @@ jobs:
       max-tokens: 8192
 ```
 
-### 串联多步：先总结再翻译
+### Chain steps: summarize then translate
 
 ```yaml
 jobs:
@@ -246,7 +246,7 @@ jobs:
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
-      prompt: "用三个要点总结这份文档：${{ vars.DOC }}"
+      prompt: "Summarize this document in three bullets: ${{ vars.DOC }}"
 
   translate:
     needs: summarize
@@ -254,25 +254,25 @@ jobs:
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
-      prompt: "把以下内容翻译成英文：\n\n${{ needs.summarize.outputs.response }}"
+      prompt: "Translate the following into English:\n\n${{ needs.summarize.outputs.response }}"
 ```
 
-## 注意事项
+## Notes
 
-- **token 安全**：`DEVIN_TOKEN` 必须放在 `secrets`，不要硬编码或写入 `with`。workflow 日志里 `scripts/chat.ts` 只打印回复，不打印 token。
-- **ref 固定**：生产用固定 tag 或 SHA；`@main` 会随上游变动。
-- **并发**：reusable workflow 每次调用是独立 job，无端口/状态冲突，可并发触发。
-- **超时**：默认 job 超时 360 分钟（GitHub 上限）。Devin 长回复可能耗时较久，必要时在调用方 job 用 `timeout-minutes` 控制。
-- **模型可用性**：`model` 参数不校验是否在目录内——传未知 UID 会直通给 Devin API。目录内的模型 id 见主 README 的「模型列表」章节，但该列表随时可能更新，**不作为 workflow 的约束**；以 `GET /v1/models?source=remote` 的实时结果为准。
-- **effort 语义**：`effort` 仅对带 `effortRouting` 的模型（如 `glm-5-2`、`claude-opus-4-8`）生效；对无路由的模型会被忽略，使用模型默认强度。
-- **Bun 版本**：workflow 用 `oven-sh/setup-bun@v2` 的 `latest`，如需固定版本可在本仓库 fork 后修改。
+- **Token security**: `DEVIN_TOKEN` must go in `secrets` — never hardcode it or put it in `with`. `scripts/chat.ts` only prints the reply to logs, never the token.
+- **Pin the ref**: use a tag or SHA in production; `@main` drifts with upstream.
+- **Concurrency**: each reusable-workflow call is an independent job with no port or state conflicts, so calls can run concurrently.
+- **Timeout**: the default job timeout is 360 minutes (the GitHub cap). Long Devin replies can take a while — set `timeout-minutes` on the calling job if needed.
+- **Model availability**: the `model` input is not validated against the catalog — unknown UIDs pass straight through to the Devin API. Catalog ids are listed in the main README's "Models" section, but that list may change at any time and is **not a constraint on the workflow**; trust `GET /v1/models?source=remote` for the live set.
+- **Effort semantics**: `effort` only affects models with `effortRouting` (e.g. `glm-5-2`, `claude-opus-4-8`); it's ignored for models without routing, which use their default effort.
+- **Bun version**: the workflow uses `latest` from `oven-sh/setup-bun@v2`; fork this repo and pin it if you need a fixed version.
 
-## 故障排查
+## Troubleshooting
 
-| 现象 | 排查 |
+| Symptom | Fix |
 | --- | --- |
-| `DEVIN_TOKEN is required` | 调用方仓库未配置 `DEVIN_TOKEN` secret，或 `secrets:` 映射写错 |
-| `Devin API 401/403` | token 失效或订阅过期，重新 `bun run login` 并更新 secret |
-| `response` 为空 | 模型返回空内容；检查 `finish_reason`，或调高 `max-tokens` |
-| job 超时 | 长回复或服务端慢；调用方加 `timeout-minutes`，或减小 `max-tokens` |
-| `uses` 解析失败 | ref 不存在或仓库未公开；确认 tag/SHA 正确 |
+| `DEVIN_TOKEN is required` | The calling repo has no `DEVIN_TOKEN` secret, or the `secrets:` mapping is wrong |
+| `Devin API 401/403` | Token expired or subscription lapsed — re-run `bun run login` and update the secret |
+| `response` is empty | Model returned empty; check `finish_reason`, or raise `max-tokens` |
+| Job timeout | Long reply or slow server; add `timeout-minutes` on the caller, or lower `max-tokens` |
+| `uses` won't resolve | The ref doesn't exist or the repo isn't public; verify the tag/SHA |

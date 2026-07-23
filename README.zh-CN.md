@@ -274,7 +274,7 @@ await handle.stop();
 
 仓库内置可复用 workflow `.github/workflows/devin-chat.yml`，把 Devin 当作 model provider 接入任意仓库的 CI——不启动 HTTP 服务、不管端口。token 通过 `secrets` 传入，提示词通过 `with` 传入，回复从 job 输出读取。
 
-完整说明见 **[docs/github-actions.md](docs/github-actions.md)**：输入输出、secret 配置、以及开箱即用的示例（PR 审查、commit message 生成、多步串联）。
+完整说明见 **[docs/github-actions.zh-CN.md](docs/github-actions.zh-CN.md)**：输入输出、secret 配置、以及开箱即用的示例（PR 审查、commit message 生成、多步串联）。英文版见 **[docs/github-actions.md](docs/github-actions.md)**。
 
 ## 架构
 
