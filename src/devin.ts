@@ -26,6 +26,7 @@ import {
   decodeGetUserJwtResponse,
   encodeGetChatMessageRequest,
   decodeGetChatMessageResponse,
+  ProtoDecoder,
   ProtoEncoder,
 } from "./proto.ts";
 
@@ -303,9 +304,8 @@ export async function discoverModels(
     throw new Error(`Devin model discovery ${res.status} ${res.statusText}: ${text}`);
   }
   const data = new Uint8Array(await res.arrayBuffer());
-  // Minimal decode: extract repeated ClientModelConfig (field 1)
-  // Each config has: model_uid (field 1), label (field 3), disabled (field 6)
-  // This is a best-effort parse — fall back to null on any error
+  // Decode GetCliModelConfigsResponse and its repeated ClientModelConfig field.
+  // Field numbers follow the reference Codeium proto; malformed payloads fail closed.
   try {
     return parseCliModelConfigs(data);
   } catch {
@@ -314,88 +314,50 @@ export async function discoverModels(
 }
 
 function parseCliModelConfigs(data: Uint8Array): DiscoveredModel[] {
-  // Lightweight parse of GetCliModelConfigsResponse { repeated ClientModelConfig client_model_configs = 1; }
-  // ClientModelConfig fields we care about: model_uid=1, label=3, disabled=6, context_length=8, max_output_tokens=9
   const models: DiscoveredModel[] = [];
-  const d = new (class {
-    bytes = data;
-    pos = 0;
-    view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-    readVarint(): bigint {
-      let r = 0n, s = 0n;
-      while (this.pos < this.bytes.length) {
-        const b = this.bytes[this.pos++];
-        r |= BigInt(b & 0x7f) << s;
-        if ((b & 0x80) === 0) break;
-        s += 7n;
-      }
-      return r;
-    }
-    readTag() { const t = Number(this.readVarint()); return { field: t >>> 3, wire: t & 7 }; }
-    readString() { const l = Number(this.readVarint()); const s = this.pos; this.pos += l; return new TextDecoder().decode(this.bytes.subarray(s, s + l)); }
-    readBytes() { const l = Number(this.readVarint()); const s = this.pos; this.pos += l; return this.bytes.subarray(s, s + l); }
-    skip(w: number) { if (w === 0) this.readVarint(); else if (w === 1) this.pos += 8; else if (w === 2) this.pos += Number(this.readVarint()); else if (w === 5) this.pos += 4; }
-    get done() { return this.pos >= this.bytes.length; }
-  })();
+  const decoder = new ProtoDecoder(data);
 
-  while (!d.done) {
-    const { field, wire } = d.readTag();
+  while (!decoder.done) {
+    const { field, wire } = decoder.readTag();
     if (field === 1 && wire === 2) {
-      const subData = d.readBytes();
-      const model = parseClientModelConfig(subData);
+      const model = decoder.readMessage(parseClientModelConfig);
       if (model) models.push(model);
     } else {
-      d.skip(wire);
+      decoder.skip(wire);
     }
   }
+
   return models;
 }
 
-function parseClientModelConfig(data: Uint8Array): DiscoveredModel | null {
-  let id = "", label = "", disabled = false, contextWindow = 200_000, maxTokens = 64_000;
-  let pos = 0;
-  const bytes = data;
-  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
-  const readVarint = (): bigint => {
-    let r = 0n, s = 0n;
-    while (pos < bytes.length) {
-      const b = bytes[pos++];
-      r |= BigInt(b & 0x7f) << s;
-      if ((b & 0x80) === 0) break;
-      s += 7n;
-    }
-    return r;
-  };
-  const readString = (): string => {
-    const l = Number(readVarint());
-    const s = pos;
-    pos += l;
-    return new TextDecoder().decode(bytes.subarray(s, s + l));
-  };
-  const skip = (w: number) => {
-    if (w === 0) readVarint();
-    else if (w === 1) pos += 8;
-    else if (w === 2) pos += Number(readVarint());
-    else if (w === 5) pos += 4;
-  };
+function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
+  let id = "";
+  let label = "";
+  let disabled = false;
+  let configuredMaxTokens = 0;
 
-  while (pos < bytes.length) {
-    const tag = Number(readVarint());
-    const field = tag >>> 3;
-    const wire = tag & 7;
-    switch (field) {
-      case 1: id = readString(); break;
-      case 3: label = readString(); break;
-      case 6: disabled = readVarint() !== 0n; break;
-      case 8: contextWindow = Number(readVarint()); break;
-      case 9: maxTokens = Number(readVarint()); break;
-      default: skip(wire);
+  while (!decoder.done) {
+    const { field, wire } = decoder.readTag();
+    if (field === 1 && wire === 2) {
+      label = decoder.readString();
+    } else if (field === 4 && wire === 0) {
+      disabled = decoder.readVarint() !== 0n;
+    } else if (field === 18 && wire === 0) {
+      configuredMaxTokens = Number(decoder.readVarint());
+    } else if (field === 22 && wire === 2) {
+      id = decoder.readString();
+    } else {
+      decoder.skip(wire);
     }
   }
-  if (disabled || !id) return null;
+
+  if (disabled || !id.trim()) return null;
+
+  const contextWindow = configuredMaxTokens > 0 ? configuredMaxTokens : 200_000;
+  const maxTokens = Math.min(configuredMaxTokens > 0 ? configuredMaxTokens : 64_000, 64_000);
   return {
-    id,
-    name: label.trim() || id,
+    id: id.trim(),
+    name: label.trim() || id.trim(),
     contextWindow,
     maxTokens,
     reasoning: true,
