@@ -25,7 +25,11 @@ scripts/chat.ts → chat() → Devin/Cascade API
 
 ### 1. 获取 Devin token
 
-在本地（任意装了 Bun 的机器）执行：
+workflow 需要的是 token 的**完整字符串值**（形如 `devin-session-token$xxxx...`），用来填入 GitHub secret。以下任一方式均可获取，按你的环境选择。
+
+> 需要有效的 Devin 或 Windsurf 订阅。本网关不提供账号或额度。
+
+#### 方式 A：本地浏览器登录（推荐，有桌面环境）
 
 ```bash
 git clone https://github.com/caijinglong/devin-gateway.git
@@ -34,9 +38,46 @@ bun install
 bun run login
 ```
 
-浏览器会自动打开完成 OAuth。登录成功后 token 写入 `~/.devin-gateway/token`，形如 `devin-session-token$xxxx...`。也可用 `bun run login -- --print` 只打印不保存。
+浏览器自动打开完成 OAuth，token 写入 `~/.devin-gateway/token`。读取字符串值：
 
-> 需要有效的 Devin 或 Windsurf 订阅。本网关不提供账号或额度。
+```bash
+cat ~/.devin-gateway/token
+```
+
+或登录时直接打印不落盘：
+
+```bash
+bun run login -- --print
+```
+
+#### 方式 B：粘贴回调 URL（SSH / 无浏览器 / 远程机器）
+
+本机无法接收浏览器回调时（SSH、容器、无头服务器），用 paste 模式手动粘贴：
+
+```bash
+bun run login:paste
+```
+
+按提示打开打印出的 auth URL，在浏览器完成登录后，把地址栏里的回调 URL（形如 `http://127.0.0.1:59653/callback?code=...&state=...`）粘贴回终端。同样可加 `--print` 只打印 token：
+
+```bash
+bun run login:paste -- --print
+```
+
+#### 方式 C：Web 登录（已在本机跑着 gateway）
+
+启动服务后浏览器打开 `http://localhost:3000/login`，完成授权后 token 写入同一文件。若回调无法到达本机（远程部署），页面上有粘贴框，把回调 URL 粘进去即可。
+
+#### 方式 D：检查现有 token
+
+```bash
+bun run login:status     # 显示 token 状态（前缀 + 是否存在）
+cat ~/.devin-gateway/token   # 直接读出完整值
+```
+
+#### 关于 DEVIN_API_KEY 环境变量
+
+`DEVIN_API_KEY` 是给 gateway 服务端用的优先级覆盖项，**不是获取 token 的方式**。workflow 调用的是 `chat()`，它读 `DEVIN_TOKEN`（脚本入参）或 `DEVIN_API_KEY` 环境变量——但在 Actions 里应通过 `secrets.DEVIN_TOKEN` 传入，不要用环境变量明文。
 
 ### 2. 在调用方仓库配置 secret
 
