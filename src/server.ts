@@ -50,9 +50,12 @@ async function saveToken(token: string): Promise<void> {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function extractToken(req: Request): string {
+  // Authorization: Bearer <token> (OpenAI) or bare <token>
   const auth = req.headers.get("authorization") ?? "";
-  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : "";
-  return bearer || storedToken;
+  const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : auth;
+  // x-api-key: <token> (Anthropic SDK convention)
+  const apiKey = req.headers.get("x-api-key") ?? "";
+  return bearer || apiKey || storedToken;
 }
 
 function jsonResponse(req: Request, body: unknown, status = 200): Response {
@@ -90,7 +93,7 @@ interface OpenAIChatRequest {
 async function handleChatCompletions(req: Request): Promise<Response> {
   const body = (await req.json()) as OpenAIChatRequest;
   const token = extractToken(req);
-  if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token>.", "authentication_error");
+  if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
 
   const modelUid = body.model;
   const internal = openaiToInternal(body.messages);
@@ -284,7 +287,7 @@ interface OpenAIResponsesRequest {
 async function handleResponses(req: Request): Promise<Response> {
   const body = (await req.json()) as OpenAIResponsesRequest;
   const token = extractToken(req);
-  if (!token) return errorResponse(req, 401, "No Devin API key.", "authentication_error");
+  if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
 
   // Convert `input` to OpenAI messages format
   let messages: OpenAIMessage[];
@@ -459,7 +462,7 @@ interface AnthropicRequest {
 async function handleAnthropicMessages(req: Request): Promise<Response> {
   const body = (await req.json()) as AnthropicRequest;
   const token = extractToken(req);
-  if (!token) return errorResponse(req, 401, "No Devin API key.", "authentication_error");
+  if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
 
   const modelUid = body.model;
   const internal = anthropicToInternal(body.messages);
