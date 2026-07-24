@@ -9,7 +9,6 @@
 
 import { streamChat } from "./devin.ts";
 import { readToken } from "./config.ts";
-import { resolveModelUid } from "./models.ts";
 import {
   openaiToInternal,
   openaiToolsToDevin,
@@ -22,12 +21,10 @@ import {
 export interface ChatOptions {
   /** Devin session token; falls back to `DEVIN_API_KEY` env or the token file. */
   token?: string;
-  /** Model id from the catalog (e.g. `claude-opus-4-8`) or a raw Cascade UID. */
+  /** Cascade model UID (e.g. `claude-opus-4-8-low`) — forwarded verbatim. */
   model: string;
   messages: OpenAIMessage[];
   tools?: OpenAITool[];
-  /** Reasoning effort, routed via the model's `effortRouting` map. */
-  effort?: string;
   maxTokens?: number;
   temperature?: number;
   topP?: number;
@@ -86,7 +83,7 @@ export async function chat(options: ChatOptions): Promise<ChatResult> {
     );
   }
 
-  const modelUid = resolveModelUid(options.model, options.effort);
+  const modelUid = options.model;
   const internal = openaiToInternal(options.messages);
   const cascadeId = options.cascadeId ?? crypto.randomUUID();
   const prompts = toDevinPrompts(internal, cascadeId);

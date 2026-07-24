@@ -8,7 +8,7 @@
 调用方 workflow
     │  uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@<ref>
     │  secrets: DEVIN_TOKEN
-    │  with:   prompt / model / effort / ...
+    │  with:   prompt / model / ...
     ▼
 devin-chat.yml (reusable workflow)
     │  checkout 本仓库 → setup-bun → bun run scripts/chat.ts
@@ -98,8 +98,7 @@ cat ~/.devin-gateway/token   # 直接读出完整值
 | --- | --- | --- | --- | --- |
 | `prompt` | string | 是 | — | 用户提示词 |
 | `system` | string | 否 | `""` | 系统提示词 |
-| `model` | string | 否 | `glm-5-2` | 模型 id 或原始 Cascade UID，见[可用模型](../README.zh-CN.md#可用模型) |
-| `effort` | string | 否 | `high` | 推理强度，经模型 `effortRouting` 路由；仅对带 effort 路由的模型生效 |
+| `model` | string | 否 | `glm-5-2` | Cascade 模型 UID，见[可用模型](../README.zh-CN.md#可用模型) |
 | `max-tokens` | number | 否 | `0` | 最大输出 token，`0` 表示用服务端默认 |
 | `temperature` | number | 否 | `0` | 采样温度，`0` 表示用服务端默认 |
 | `top-p` | number | 否 | `0` | top-p，`0` 表示用服务端默认 |
@@ -209,8 +208,7 @@ jobs:
     with:
       system: "输出 Conventional Commits 格式，仅一行标题 + 可选正文，不要多余解释。"
       prompt: "为以下改动生成 commit message：\n\n${{ vars.RECENT_DIFF }}"
-      model: "glm-5-2"
-      effort: "medium"
+      model: "glm-5-2-max"
 ```
 
 ### 手动触发 + 自定义模型
@@ -232,8 +230,7 @@ jobs:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
       prompt: ${{ inputs.question }}
-      model: "claude-opus-4-8"
-      effort: "max"
+      model: "claude-opus-4-8-max"
       max-tokens: 8192
 ```
 
@@ -264,7 +261,6 @@ jobs:
 - **并发**：reusable workflow 每次调用是独立 job，无端口/状态冲突，可并发触发。
 - **超时**：默认 job 超时 360 分钟（GitHub 上限）。Devin 长回复可能耗时较久，必要时在调用方 job 用 `timeout-minutes` 控制。
 - **模型可用性**：`model` 参数不校验是否在目录内——传未知 UID 会直通给 Devin API。目录内的模型 id 见主 README 的「可用模型」章节，但该列表随时可能更新，**不作为 workflow 的约束**；以 `GET /v1/models?source=remote` 的实时结果为准。
-- **effort 语义**：`effort` 仅对带 `effortRouting` 的模型（如 `glm-5-2`、`claude-opus-4-8`）生效；对无路由的模型会被忽略，使用模型默认强度。
 - **Bun 版本**：workflow 用 `oven-sh/setup-bun@v2` 的 `latest`，如需固定版本可在本仓库 fork 后修改。
 
 ## 故障排查

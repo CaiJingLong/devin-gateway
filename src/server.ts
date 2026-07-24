@@ -13,7 +13,7 @@
  */
 
 import { streamChat, discoverModels, type ChatStreamEvent } from "./devin.ts";
-import { getModel, listModels, resolveModelUid, type ModelInfo } from "./models.ts";
+import { listModels, type ModelInfo } from "./models.ts";
 import {
   openaiToInternal,
   openaiToolsToDevin,
@@ -92,7 +92,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   const token = extractToken(req);
   if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token>.", "authentication_error");
 
-  const modelUid = resolveModelUid(body.model, body.reasoning_effort);
+  const modelUid = body.model;
   const internal = openaiToInternal(body.messages);
   const cascadeId = crypto.randomUUID();
   const prompts = toDevinPrompts(internal, cascadeId);
@@ -305,7 +305,7 @@ async function handleResponses(req: Request): Promise<Response> {
     messages = [{ role: "developer", content: body.instructions }, ...messages];
   }
 
-  const modelUid = resolveModelUid(body.model, body.reasoning?.effort);
+  const modelUid = body.model;
   const internal = openaiToInternal(messages);
   const cascadeId = crypto.randomUUID();
   const prompts = toDevinPrompts(internal, cascadeId);
@@ -461,7 +461,7 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
   const token = extractToken(req);
   if (!token) return errorResponse(req, 401, "No Devin API key.", "authentication_error");
 
-  const modelUid = resolveModelUid(body.model);
+  const modelUid = body.model;
   const internal = anthropicToInternal(body.messages);
   const cascadeId = crypto.randomUUID();
   const prompts = toDevinPrompts(internal, cascadeId);

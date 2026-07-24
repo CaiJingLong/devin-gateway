@@ -13,7 +13,7 @@
  *   DEVIN_TOKEN        (required) Devin session token
  *   INPUT_PROMPT       (required) user prompt
  *   INPUT_SYSTEM       (optional) system prompt
- *   INPUT_EFFORT       (optional) reasoning effort
+ *   INPUT_MODEL        (optional) Cascade model UID
  *   INPUT_MAX_TOKENS   (optional)
  *   INPUT_TEMPERATURE  (optional)
  *   INPUT_TOP_P        (optional)
@@ -27,7 +27,6 @@ const token = process.env.DEVIN_TOKEN ?? "";
 const prompt = process.env.INPUT_PROMPT ?? "";
 const system = process.env.INPUT_SYSTEM ?? "";
 const model = process.env.INPUT_MODEL ?? "glm-5-2";
-const effort = process.env.INPUT_EFFORT || "high";
 const maxTokens = process.env.INPUT_MAX_TOKENS ? Number(process.env.INPUT_MAX_TOKENS) : undefined;
 const temperature = process.env.INPUT_TEMPERATURE ? Number(process.env.INPUT_TEMPERATURE) : undefined;
 const topP = process.env.INPUT_TOP_P ? Number(process.env.INPUT_TOP_P) : undefined;
@@ -51,7 +50,6 @@ const result = await chat({
   token,
   model,
   messages,
-  effort,
   maxTokens,
   temperature,
   topP,

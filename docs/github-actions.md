@@ -8,7 +8,7 @@ This repo ships a reusable workflow, `.github/workflows/devin-chat.yml`, that tu
 Caller workflow
     │  uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@<ref>
     │  secrets: DEVIN_TOKEN
-    │  with:   prompt / model / effort / ...
+    │  with:   prompt / model / ...
     ▼
 devin-chat.yml (reusable workflow)
     │  checkout this repo → setup-bun → bun run scripts/chat.ts
@@ -98,8 +98,7 @@ Pin `@<ref>` in `uses:` to a specific tag (e.g. `@v0.1.0`) or commit SHA so upst
 | --- | --- | --- | --- | --- |
 | `prompt` | string | yes | — | User prompt |
 | `system` | string | no | `""` | System prompt |
-| `model` | string | no | `glm-5-2` | Model id or raw Cascade UID; see [Models](../README.md#models) |
-| `effort` | string | no | `high` | Reasoning effort, routed via the model's `effortRouting`; only affects models with effort routing |
+| `model` | string | no | `glm-5-2` | Cascade model UID; see [Models](../README.md#models) |
 | `max-tokens` | number | no | `0` | Max output tokens; `0` uses the server default |
 | `temperature` | number | no | `0` | Sampling temperature; `0` uses the server default |
 | `top-p` | number | no | `0` | Top-p; `0` uses the server default |
@@ -209,8 +208,7 @@ jobs:
     with:
       system: "Output Conventional Commits format: one-line subject + optional body. No extra explanation."
       prompt: "Generate a commit message for these changes:\n\n${{ vars.RECENT_DIFF }}"
-      model: "glm-5-2"
-      effort: "medium"
+      model: "glm-5-2-max"
 ```
 
 ### Manual trigger with a custom model
@@ -232,8 +230,7 @@ jobs:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
       prompt: ${{ inputs.question }}
-      model: "claude-opus-4-8"
-      effort: "max"
+      model: "claude-opus-4-8-max"
       max-tokens: 8192
 ```
 
@@ -264,7 +261,6 @@ jobs:
 - **Concurrency**: each reusable-workflow call is an independent job with no port or state conflicts, so calls can run concurrently.
 - **Timeout**: the default job timeout is 360 minutes (the GitHub cap). Long Devin replies can take a while — set `timeout-minutes` on the calling job if needed.
 - **Model availability**: the `model` input is not validated against the catalog — unknown UIDs pass straight through to the Devin API. Catalog ids are listed in the main README's "Models" section, but that list may change at any time and is **not a constraint on the workflow**; trust `GET /v1/models?source=remote` for the live set.
-- **Effort semantics**: `effort` only affects models with `effortRouting` (e.g. `glm-5-2`, `claude-opus-4-8`); it's ignored for models without routing, which use their default effort.
 - **Bun version**: the workflow uses `latest` from `oven-sh/setup-bun@v2`; fork this repo and pin it if you need a fixed version.
 
 ## Troubleshooting

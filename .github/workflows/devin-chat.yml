@@ -12,7 +12,7 @@ name: Devin Chat
 #         DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
 #       with:
 #         prompt: "Summarize the diff in three bullets"
-#         model: "claude-opus-4-8"
+#         model: "claude-opus-4-8-low"
 #     use:
 #       needs: ask-devin
 #       runs-on: ubuntu-latest
@@ -36,11 +36,6 @@ on:
         required: false
         type: string
         default: "glm-5-2"
-      effort:
-        description: "Reasoning effort, routed via the model's effortRouting map"
-        required: false
-        type: string
-        default: "high"
       max-tokens:
         description: "Max output tokens"
         required: false
@@ -89,7 +84,6 @@ jobs:
           INPUT_PROMPT: ${{ inputs.prompt }}
           INPUT_SYSTEM: ${{ inputs.system }}
           INPUT_MODEL: ${{ inputs.model }}
-          INPUT_EFFORT: ${{ inputs.effort }}
           INPUT_MAX_TOKENS: ${{ inputs.max-tokens }}
           INPUT_TEMPERATURE: ${{ inputs.temperature }}
           INPUT_TOP_P: ${{ inputs.top-p }}
