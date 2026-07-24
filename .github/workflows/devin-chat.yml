@@ -7,7 +7,7 @@ name: Devin Chat
 #
 #   jobs:
 #     ask-devin:
-#       uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+#       uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
 #       secrets:
 #         DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
 #       with:

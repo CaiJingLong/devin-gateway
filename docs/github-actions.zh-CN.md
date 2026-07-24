@@ -90,7 +90,7 @@ cat ~/.devin-gateway/token   # 直接读出完整值
 
 ### 3. 固定 workflow ref
 
-`uses:` 里的 `@<ref>` 建议固定到具体 tag（如 `@v0.1.0`）或 commit SHA，避免上游变更意外影响你的 CI。`@main` 可用于前期调试，不建议长期使用。
+`uses:` 里的 `@<ref>` 建议固定到具体 tag（如 `@v0.3.0`）或 commit SHA，避免上游变更意外影响你的 CI。`@main` 可用于前期调试，不建议长期使用。
 
 ## 输入参数
 
@@ -128,7 +128,7 @@ on:
 
 jobs:
   ask-devin:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -160,7 +160,7 @@ permissions:
 
 jobs:
   review:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -202,7 +202,7 @@ on:
 
 jobs:
   generate:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -225,7 +225,7 @@ on:
 
 jobs:
   ask:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -239,7 +239,7 @@ jobs:
 ```yaml
 jobs:
   summarize:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -247,7 +247,7 @@ jobs:
 
   translate:
     needs: summarize
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.1.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.3.0
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:

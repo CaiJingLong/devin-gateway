@@ -57,7 +57,7 @@ docker run -d \
   -p 127.0.0.1:3000:3000 \
   -e DEVIN_GATEWAY_CONFIG_DIR=/config \
   -v "$HOME/.devin-gateway:/config" \
-  ghcr.io/caijinglong/devin-gateway:0.1.0
+  ghcr.io/caijinglong/devin-gateway:0.3.0
 ```
 
 该卷将宿主机的 token 目录映射到容器内的 `/config`。后续重新运行 `bun run login` 时，容器会自动加载新 token，无需重启。
@@ -69,7 +69,7 @@ docker run -d \
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.1.0
+    image: ghcr.io/caijinglong/devin-gateway:0.3.0
     container_name: devin-gateway
     restart: unless-stopped
     ports:
