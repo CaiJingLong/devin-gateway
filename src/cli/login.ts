@@ -111,7 +111,10 @@ async function finishLogin(token: string): Promise<void> {
   console.log("");
   console.log(`  Token saved to: ${TOKEN_FILE}`);
   console.log("");
-  console.log("  You can now start the gateway server:");
+  console.log("  Token (copy to your client's API key field):");
+  console.log(`  ${token}`);
+  console.log("");
+  console.log("  Start the gateway and point your client at it:");
   console.log("    bun run src/index.ts");
   console.log("");
 }

@@ -6,10 +6,12 @@
  *   POST /v1/responses          — OpenAI Responses API
  *   POST /v1/messages           — Anthropic Messages
  *   GET  /v1/models             — OpenAI-style model list
- *   GET  /login                 — start OAuth flow
- *   GET  /login/callback        — OAuth callback
- *   POST /login/paste           — paste redirect URL to complete flow
  *   GET  /health                — health check
+ *
+ * The server holds no token state. Each request must carry its own
+ * credentials via `Authorization: Bearer <token>` or `x-api-key: <token>`.
+ * `DEVIN_API_KEY` (or `ServerOptions.token`) is an optional fallback used
+ * only when a request omits both headers.
  */
 
 import { streamChat, discoverModels, type ChatStreamEvent } from "./devin.ts";
@@ -28,24 +30,15 @@ import {
   type AnthropicTool,
 } from "./convert.ts";
 import { StopReason } from "./proto.ts";
-import { startLoginFlow, completeLoginWithUrl, type LoginSession } from "./login.ts";
-import { readToken, writeToken, watchToken } from "./config.ts";
 
 // ─── Config (populated by startServer) ──────────────────────────────────────
 
 let PORT = 3000;
 let HOST = "0.0.0.0";
-/** If set, used as the Devin session token for all requests when the client doesn't supply one. */
+/** Optional fallback token (from DEVIN_API_KEY or ServerOptions.token) when a request carries no credentials. */
 let DEFAULT_DEVIN_KEY = "";
 /** Base URL override for the Devin API (default: https://server.codeium.com). */
 let DEVIN_BASE_URL = "";
-let storedToken = "";
-let stopTokenWatcher: () => void = () => {};
-
-async function saveToken(token: string): Promise<void> {
-  storedToken = token;
-  await writeToken(token);
-}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -55,7 +48,8 @@ function extractToken(req: Request): string {
   const bearer = auth.startsWith("Bearer ") ? auth.slice(7) : auth;
   // x-api-key: <token> (Anthropic SDK convention)
   const apiKey = req.headers.get("x-api-key") ?? "";
-  return bearer || apiKey || storedToken;
+  // Per-request credentials override the optional DEVIN_API_KEY fallback.
+  return bearer || apiKey || DEFAULT_DEVIN_KEY;
 }
 
 function jsonResponse(req: Request, body: unknown, status = 200): Response {
@@ -706,71 +700,6 @@ async function handleModels(req: Request): Promise<Response> {
   }
 }
 
-// ─── Login flow ──────────────────────────────────────────────────────────────
-
-const loginSessions = new Map<string, LoginSession>();
-
-async function handleLogin(req: Request): Promise<Response> {
-  const callbackUrl = new URL("/login/callback", `http://${req.headers.get("host") ?? `localhost:${PORT}`}`).href;
-  const session = await startLoginFlow(callbackUrl);
-  loginSessions.set(session.state, session);
-
-  const html = `<!doctype html><html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px">
-<h1>Devin Login</h1>
-<p>Click the link below to sign in to Devin:</p>
-<p><a href="${session.authUrl}" style="font-size:1.2em;padding:10px 20px;background:#4f46e5;color:#fff;border-radius:8px;text-decoration:none">Sign in to Devin →</a></p>
-<p style="color:#666;font-size:0.9em">After signing in, you'll be redirected back here with your token.</p>
-<p style="color:#666;font-size:0.9em">Or if the callback can't reach this server, paste the redirect URL here:</p>
-<form method="POST" action="/login/paste"><input name="url" placeholder="http://127.0.0.1:${PORT}/login/callback?code=...&state=..." style="width:100%;padding:8px;margin:8px 0"><button type="submit">Submit</button></form>
-</body></html>`;
-
-  return new Response(html, { headers: { "content-type": "text/html", ...corsHeaders(req) } });
-}
-
-async function handleLoginCallback(req: Request): Promise<Response> {
-  const url = new URL(req.url);
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  if (!code || !state) return errorResponse(req, 400, "Missing code or state");
-  const session = loginSessions.get(state);
-  if (!session) return errorResponse(req, 400, "Invalid or expired login session");
-
-  try {
-    const token = await completeLoginWithUrl(session, `${url.pathname}?${url.searchParams.toString()}`);
-    loginSessions.delete(state);
-    await saveToken(token);
-    const html = `<!doctype html><html><body style="font-family:system-ui;max-width:600px;margin:40px auto;padding:20px">
-<h1>✅ Login successful</h1><p>Your Devin token has been saved and is ready to use.</p>
-<p style="word-break:break-all;background:#f3f4f6;padding:12px;border-radius:8px;font-family:monospace;font-size:0.85em">${token}</p>
-<p style="color:#666">You can now use this gateway with any OpenAI/Anthropic compatible client.</p></body></html>`;
-    return new Response(html, { headers: { "content-type": "text/html" } });
-  } catch (err) {
-    return errorResponse(req, 502, `Login failed: ${String((err as Error).message ?? err)}`);
-  }
-}
-
-async function handleLoginPaste(req: Request): Promise<Response> {
-  const formData = await req.formData();
-  const redirectUrl = formData.get("url") as string;
-  if (!redirectUrl) return errorResponse(req, 400, "Missing url field");
-
-  const url = new URL(redirectUrl, "http://localhost");
-  const code = url.searchParams.get("code");
-  const state = url.searchParams.get("state");
-  if (!code || !state) return errorResponse(req, 400, "URL missing code or state");
-  const session = loginSessions.get(state);
-  if (!session) return errorResponse(req, 400, "Invalid or expired login session");
-
-  try {
-    const token = await completeLoginWithUrl(session, `${url.pathname}?${url.searchParams.toString()}`);
-    loginSessions.delete(state);
-    await saveToken(token);
-    return jsonResponse(req, { success: true, token, message: "Token saved. You can now use the gateway." });
-  } catch (err) {
-    return errorResponse(req, 502, `Login failed: ${String((err as Error).message ?? err)}`);
-  }
-}
-
 // ─── Server lifecycle ───────────────────────────────────────────────────────
 
 export interface ServerOptions {
@@ -778,43 +707,30 @@ export interface ServerOptions {
   port?: number;
   /** Listening address (default: `HOST` env or `0.0.0.0`). */
   host?: string;
-  /** Devin session token; falls back to `DEVIN_API_KEY` env or the token file. */
+  /** Optional fallback token when a request carries no credentials (default: `DEVIN_API_KEY` env). */
   token?: string;
   /** Override for the Devin API base URL (default: `DEVIN_BASE_URL` env). */
   baseUrl?: string;
-  /** Reload the token from disk when the file changes (default: `true`). */
-  watchTokenFile?: boolean;
 }
 
 export interface ServerHandle {
   port: number;
   host: string;
-  /** Gracefully stop the server and token watcher. */
+  /** Gracefully stop the server. */
   stop: () => Promise<void>;
 }
 
 /**
  * Start the HTTP gateway. Reads `PORT`/`HOST`/`DEVIN_API_KEY`/`DEVIN_BASE_URL`
- * from the environment when the equivalent option is omitted.
+ * from the environment when the equivalent option is omitted. The server holds
+ * no token state; `DEVIN_API_KEY` is only a fallback for requests that omit
+ * `Authorization`/`x-api-key` headers.
  */
 export async function startServer(options: ServerOptions = {}): Promise<ServerHandle> {
   PORT = options.port ?? Number(process.env.PORT ?? 3000);
   HOST = options.host ?? process.env.HOST ?? "0.0.0.0";
   DEFAULT_DEVIN_KEY = options.token ?? process.env.DEVIN_API_KEY ?? "";
   DEVIN_BASE_URL = options.baseUrl ?? process.env.DEVIN_BASE_URL ?? "";
-  storedToken = DEFAULT_DEVIN_KEY || (await readToken());
-
-  if (options.watchTokenFile !== false) {
-    stopTokenWatcher = watchToken((token) => {
-      if (token && token !== storedToken) {
-        storedToken = token;
-        console.log(`[token] Reloaded from config file (${token.slice(0, 12)}...)`);
-      } else if (!token && storedToken && !DEFAULT_DEVIN_KEY) {
-        storedToken = "";
-        console.log("[token] Config file cleared — token removed");
-      }
-    });
-  }
 
   const server = Bun.serve({
     port: PORT,
@@ -832,18 +748,14 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
       try {
         // Health
         if (path === "/health" && method === "GET") {
-          return jsonResponse(req, { status: "ok", token: storedToken ? "configured" : "not_set" });
+          return jsonResponse(req, { status: "ok", fallback_token: DEFAULT_DEVIN_KEY ? "configured" : "not_set" });
         }
 
         if (path === "/v1/models" && method === "GET") return await handleModels(req);
-        if (path === "/login" && method === "GET") return await handleLogin(req);
-        if (path === "/login/callback" && method === "GET") return await handleLoginCallback(req);
-        if (path === "/login/paste" && method === "POST") return await handleLoginPaste(req);
 
         // OpenAI
         if (path === "/v1/chat/completions" && method === "POST") return await handleChatCompletions(req);
         if (path === "/v1/responses" && method === "POST") return await handleResponses(req);
-        if (path === "/v1/models" && method === "GET") return handleModels(req);
 
         // Anthropic
         if (path === "/v1/messages" && method === "POST") return await handleAnthropicMessages(req);
@@ -860,7 +772,6 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
   const stop = async (): Promise<void> => {
     if (shutdownStarted) return;
     shutdownStarted = true;
-    stopTokenWatcher();
     await server.stop();
   };
 
@@ -876,9 +787,9 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
   console.log(`Devin Gateway running at http://${HOST}:${PORT}`);
   console.log(`  OpenAI:    POST /v1/chat/completions, POST /v1/responses, GET /v1/models`);
   console.log(`  Anthropic: POST /v1/messages`);
-  console.log(`  Login:     GET  /login`);
   console.log(`  Health:    GET  /health`);
-  console.log(storedToken ? "  Token:     configured" : "  Token:     not set — visit /login or set DEVIN_API_KEY");
-
+  console.log(DEFAULT_DEVIN_KEY
+    ? "  Fallback:  DEVIN_API_KEY configured (used when a request sends no credentials)"
+    : "  Fallback:  none — each request must send Authorization / x-api-key");
   return { port: PORT, host: HOST, stop };
 }

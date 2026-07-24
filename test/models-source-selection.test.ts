@@ -89,7 +89,6 @@ test("selects remote models by default and the built-in catalog when source=loca
       port,
       token: "test-session-token",
       baseUrl: upstream.url.origin,
-      watchTokenFile: false,
     });
     const gatewayUrl = `http://${HOST}:${port}`;
 

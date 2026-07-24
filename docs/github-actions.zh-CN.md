@@ -64,11 +64,7 @@ bun run login:paste
 bun run login:paste -- --print
 ```
 
-#### 方式 C：Web 登录（已在本机跑着 gateway）
-
-启动服务后浏览器打开 `http://localhost:3000/login`，完成授权后 token 写入同一文件。若回调无法到达本机（远程部署），页面上有粘贴框，把回调 URL 粘进去即可。
-
-#### 方式 D：检查现有 token
+#### 方式 C：检查现有 token
 
 ```bash
 bun run login:status     # 显示 token 状态（前缀 + 是否存在）
@@ -77,7 +73,7 @@ cat ~/.devin-gateway/token   # 直接读出完整值
 
 #### 关于 DEVIN_API_KEY 环境变量
 
-`DEVIN_API_KEY` 是给 gateway 服务端用的优先级覆盖项，**不是获取 token 的方式**。workflow 调用的是 `chat()`，它读 `DEVIN_TOKEN`（脚本入参）或 `DEVIN_API_KEY` 环境变量——但在 Actions 里应通过 `secrets.DEVIN_TOKEN` 传入，不要用环境变量明文。
+`DEVIN_API_KEY` 是 gateway 服务端的**可选兜底**，仅当请求未带 `Authorization`/`x-api-key` 时才使用——**不是获取 token 的方式**，服务端也不再读取 `~/.devin-gateway/token`（CLI 登录仍会写入该文件，仅作用户便利）。workflow 调用的是 `chat()`，它读 `DEVIN_TOKEN`（脚本入参）或 `DEVIN_API_KEY` 环境变量——但在 Actions 里应通过 `secrets.DEVIN_TOKEN` 传入，不要用环境变量明文。
 
 ### 2. 在调用方仓库配置 secret
 

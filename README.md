@@ -13,8 +13,8 @@ Expose the Devin/Windsurf Cascade API through OpenAI- and Anthropic-compatible e
 - OpenAI Responses: `POST /v1/responses`, with streaming support
 - Anthropic Messages: `POST /v1/messages`, with streaming support
 - Model listing: `GET /v1/models`
-- OAuth login through `GET /login` or `bun run login`
-- Live token reload: logging in on the host does not require a container restart
+- OAuth login CLI (`bun run login`) to obtain a Devin token
+- Per-request credentials: clients pass their own token via `Authorization` or `x-api-key`
 - No third-party runtime dependencies; Protobuf encoding and decoding are implemented in the project
 
 ## Quick start
@@ -26,13 +26,13 @@ bun install
 bun run login
 ```
 
-A browser window opens automatically. After sign-in, the token is stored at `~/.devin-gateway/token`.
+A browser window opens automatically. After sign-in, the token is printed and stored at `~/.devin-gateway/token`. Copy it into your client's API key field.
 
 Other CLI options:
 
 ```bash
 bun run login:paste       # Paste the callback URL manually
-bun run login:status      # Show the current token status
+bun run login:status      # Show the current saved token status
 bun run login -- --print  # Print the token without saving it
 ```
 
@@ -42,7 +42,7 @@ bun run login -- --print  # Print the token without saving it
 bun run start
 ```
 
-The gateway listens on `http://localhost:3000` by default and reads `~/.devin-gateway/token` automatically.
+The gateway listens on `http://localhost:3000` by default. It holds no token state — each request must carry credentials via `Authorization: Bearer <token>` (OpenAI clients) or `x-api-key: <token>` (Anthropic clients). Set `DEVIN_API_KEY` only if you want a fallback for requests that omit both headers.
 
 ### Docker
 
@@ -55,12 +55,10 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  -e DEVIN_GATEWAY_CONFIG_DIR=/config \
-  -v "$HOME/.devin-gateway:/config" \
   ghcr.io/caijinglong/devin-gateway:0.3.0
 ```
 
-The volume maps the host token directory to `/config`. A later `bun run login` updates the running container without a restart.
+Clients send their own Devin token per request, so no token volume is needed. Set `DEVIN_API_KEY` only if you want a server-side fallback.
 
 #### Docker Compose
 
@@ -77,9 +75,6 @@ services:
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
-      DEVIN_GATEWAY_CONFIG_DIR: /config
-    volumes:
-      - "${HOME}/.devin-gateway:/config"
 ```
 
 Start and inspect the service:
@@ -111,15 +106,11 @@ docker compose up -d --build
 bun run login
 ```
 
-A successful login writes the token to `~/.devin-gateway/token`.
+A successful login writes the token to `~/.devin-gateway/token` and prints it. Copy the printed token into your client's API key field.
 
-### Web login
+### Environment variable (optional server fallback)
 
-Start the gateway and open `http://localhost:3000/login`. The completed authorization flow writes to the same token file.
-
-### Environment variable
-
-Set `DEVIN_API_KEY`. It takes precedence over the token file.
+Set `DEVIN_API_KEY` to provide a fallback token for requests that omit `Authorization`/`x-api-key` headers. This is optional — the common case is for each client to send its own token.
 
 ## Cherry Studio configuration
 
@@ -290,13 +281,10 @@ curl 'http://localhost:3000/v1/models?source=local'
 | --- | --- | --- |
 | `PORT` | `3000` | Listening port |
 | `HOST` | `0.0.0.0` | Listening address |
-| `DEVIN_API_KEY` | Unset | Devin session token; takes precedence over the token file |
-| `DEVIN_GATEWAY_CONFIG_DIR` | `~/.devin-gateway` | Token configuration directory |
+| `DEVIN_API_KEY` | Unset | Optional fallback token used only when a request omits `Authorization`/`x-api-key` |
 | `DEVIN_BASE_URL` | Unset | Override for the Devin API base URL |
 
 ## API examples
-
-### OpenAI Chat Completions
 
 ```bash
 curl http://localhost:3000/v1/chat/completions \
@@ -318,6 +306,7 @@ curl http://localhost:3000/v1/chat/completions \
 ```bash
 curl http://localhost:3000/v1/messages \
   -H 'Content-Type: application/json' \
+  -H 'x-api-key: devin-session-token$xxxx' \
   -d '{"model":"claude-opus-4-8-low","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
@@ -346,7 +335,7 @@ const handle = await startServer({ port: 3000 });
 await handle.stop();
 ```
 
-`chat()` only needs the Bun runtime when reading the token file; pass `token` explicitly and it runs under plain Node.js too, which makes it suitable for GitHub Actions runners. Lower-level building blocks (`streamChat`, `discoverModels`, `getUserJwt`, converters, model catalog) are all re-exported from the package entry point.
+`chat()` only needs the Bun runtime when reading the token file; pass `token` explicitly and it runs under plain Node.js too, which makes it suitable for GitHub Actions runners. Lower-level building blocks (`streamChat`, `discoverModels`, `getUserJwt`, converters, model catalog) are all re-exported from the package entry point. The server itself holds no token state — clients send credentials per request.
 
 ## GitHub Actions
 
@@ -372,7 +361,7 @@ Key files:
 - `src/devin.ts`: Devin API client for GetUserJwt and streaming GetChatMessage
 - `src/models.ts`: model catalog and workload routing
 - `src/convert.ts`: conversion between OpenAI, Anthropic, and Devin formats
-- `src/config.ts`: token file access and live reload
+- `src/config.ts`: token file read/write helpers (used by the CLI login tool; the server no longer reads it)
 - `src/login.ts`: OAuth PKCE login flow
 - `src/cli/login.ts`: command-line login tool
 - `src/server.ts`: HTTP server and compatibility endpoints

@@ -13,8 +13,8 @@
 - OpenAI Responses：`POST /v1/responses`，支持流式响应
 - Anthropic Messages：`POST /v1/messages`，支持流式响应
 - 模型列表：`GET /v1/models`
-- OAuth 登录：通过 `GET /login` 或 `bun run login` 获取 Devin token
-- Token 热更新：宿主机登录后，Docker 容器无需重启
+- OAuth 登录 CLI（`bun run login`）获取 Devin token
+- 每次请求自带凭证：客户端通过 `Authorization` 或 `x-api-key` 传入自己的 token
 - 运行时无第三方依赖，使用手写 Protobuf 编解码器
 
 ## 快速开始
@@ -26,7 +26,7 @@ bun install
 bun run login
 ```
 
-浏览器会自动打开。登录完成后，token 保存在 `~/.devin-gateway/token`。
+浏览器会自动打开。登录完成后，token 会打印出来并保存到 `~/.devin-gateway/token`。请将打印出的 token 复制到客户端的 API Key 字段中。
 
 其他 CLI 选项：
 
@@ -42,7 +42,7 @@ bun run login -- --print  # 只打印 token，不保存
 bun run start
 ```
 
-服务默认监听 `http://localhost:3000`，并自动读取 `~/.devin-gateway/token`。
+服务默认监听 `http://localhost:3000`。服务端不保存任何 token 状态——每次请求都必须携带凭证：OpenAI 客户端使用 `Authorization: Bearer <token>`，Anthropic 客户端使用 `x-api-key: <token>`。仅当你希望为同时省略这两个头的请求提供兜底时，才设置 `DEVIN_API_KEY`。
 
 ### 使用 Docker
 
@@ -55,12 +55,9 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  -e DEVIN_GATEWAY_CONFIG_DIR=/config \
-  -v "$HOME/.devin-gateway:/config" \
   ghcr.io/caijinglong/devin-gateway:0.3.0
-```
 
-该卷将宿主机的 token 目录映射到容器内的 `/config`。后续重新运行 `bun run login` 时，容器会自动加载新 token，无需重启。
+客户端在每次请求中携带自己的 Devin token，因此无需挂载 token 卷。仅当你需要服务端兜底时，才设置 `DEVIN_API_KEY`。
 
 #### Docker Compose
 
@@ -77,9 +74,6 @@ services:
     environment:
       PORT: "3000"
       HOST: "0.0.0.0"
-      DEVIN_GATEWAY_CONFIG_DIR: /config
-    volumes:
-      - "${HOME}/.devin-gateway:/config"
 ```
 
 拉取镜像并启动服务：
@@ -111,15 +105,11 @@ docker compose up -d --build
 bun run login
 ```
 
-登录成功后，token 写入 `~/.devin-gateway/token`。
+登录成功后，token 会写入 `~/.devin-gateway/token` 并打印出来。请将打印出的 token 复制到客户端的 API Key 字段中。
 
-### Web 登录
+### 环境变量（可选的服务端兜底）
 
-启动服务后访问 `http://localhost:3000/login`。授权完成后，token 会写入同一个配置文件。
-
-### 环境变量
-
-设置 `DEVIN_API_KEY`。该变量的优先级高于配置文件。
+设置 `DEVIN_API_KEY` 可为省略 `Authorization`/`x-api-key` 头的请求提供兜底 token。此项可选——常见做法是每个客户端各自携带自己的 token。
 
 ## Cherry Studio 配置
 
@@ -290,13 +280,10 @@ curl 'http://localhost:3000/v1/models?source=local'
 | --- | --- | --- |
 | `PORT` | `3000` | 监听端口 |
 | `HOST` | `0.0.0.0` | 监听地址 |
-| `DEVIN_API_KEY` | 未设置 | Devin session token，优先于配置文件 |
-| `DEVIN_GATEWAY_CONFIG_DIR` | `~/.devin-gateway` | Token 配置目录 |
+| `DEVIN_API_KEY` | 未设置 | 可选兜底 token，仅在请求未带 `Authorization`/`x-api-key` 时使用 |
 | `DEVIN_BASE_URL` | 未设置 | Devin API 地址覆盖项 |
 
 ## API 示例
-
-### OpenAI Chat Completions
 
 ```bash
 curl http://localhost:3000/v1/chat/completions \
@@ -318,12 +305,11 @@ curl http://localhost:3000/v1/chat/completions \
 ```bash
 curl http://localhost:3000/v1/messages \
   -H 'Content-Type: application/json' \
+  -H 'x-api-key: devin-session-token$xxxx' \
   -d '{"model":"claude-opus-4-8-low","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
 ## 以库的形式调用
-
-本网关也可作为 TypeScript 库直接导入，GitHub Actions 等脚本无需经过 HTTP 服务即可直接调用 Devin。
 
 ```ts
 import { chat, listModels } from "devin-gateway";
@@ -346,7 +332,7 @@ const handle = await startServer({ port: 3000 });
 await handle.stop();
 ```
 
-`chat()` 仅在读取 token 文件时依赖 Bun 运行时；显式传入 `token` 后即可在纯 Node.js 下运行，适合 GitHub Actions runner。底层能力（`streamChat`、`discoverModels`、`getUserJwt`、格式转换、模型目录）均从包入口重新导出。
+`chat()` 仅在读取 token 文件时依赖 Bun 运行时；显式传入 `token` 后即可在纯 Node.js 下运行，适合 GitHub Actions runner。底层能力（`streamChat`、`discoverModels`、`getUserJwt`、格式转换、模型目录）均从包入口重新导出。服务端本身不持有 token 状态——客户端每次请求自带凭证。
 
 ## GitHub Actions
 
@@ -372,7 +358,7 @@ Devin / Windsurf Cascade API
 - `src/devin.ts`：Devin API 客户端，包括 GetUserJwt 和流式 GetChatMessage
 - `src/models.ts`：模型目录和工作量路由
 - `src/convert.ts`：OpenAI、Anthropic 与 Devin 格式转换
-- `src/config.ts`：Token 文件读写和热更新
+- `src/config.ts`：Token 文件读写工具（仅 CLI 登录工具使用，服务端不再读取）
 - `src/login.ts`：OAuth PKCE 登录流程
 - `src/cli/login.ts`：CLI 登录工具
 - `src/server.ts`：HTTP 服务和兼容接口

@@ -64,11 +64,7 @@ Open the printed auth URL, complete sign-in in the browser, then paste the callb
 bun run login:paste -- --print
 ```
 
-#### Option C: Web login (gateway already running locally)
-
-Start the server and open `http://localhost:3000/login` in a browser. After authorization the token is written to the same file. If the callback can't reach your machine (remote deployment), the page has a paste form — paste the callback URL there.
-
-#### Option D: Inspect an existing token
+#### Option C: Inspect an existing token
 
 ```bash
 bun run login:status     # shows token status (prefix + presence)
@@ -77,7 +73,7 @@ cat ~/.devin-gateway/token   # read the full value directly
 
 #### About the DEVIN_API_KEY env var
 
-`DEVIN_API_KEY` is a server-side override for the gateway — it is **not** a way to obtain a token. The workflow calls `chat()`, which reads `DEVIN_TOKEN` (the script input) or the `DEVIN_API_KEY` env var — but in Actions you should pass it via `secrets.DEVIN_TOKEN`, never as a plaintext env var.
+`DEVIN_API_KEY` is an **optional server-side fallback** for the gateway, used only when an incoming request omits both `Authorization` and `x-api-key` headers — it is **not** a way to obtain a token, and the server no longer reads `~/.devin-gateway/token`. The workflow calls `chat()`, which reads `DEVIN_TOKEN` (the script input) or the `DEVIN_API_KEY` env var — but in Actions you should pass it via `secrets.DEVIN_TOKEN`, never as a plaintext env var.
 
 ### 2. Configure the secret in the calling repo
 

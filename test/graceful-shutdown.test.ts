@@ -1,6 +1,4 @@
 import { expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const projectDir = join(import.meta.dir, "..");
@@ -54,7 +52,6 @@ async function within<T>(promise: Promise<T>, milliseconds: number, message: () 
 }
 
 test("SIGTERM stops the server and exits normally", async () => {
-  const configDir = await mkdtemp(join(tmpdir(), "devin-gateway-shutdown-"));
   let child: ReturnType<typeof Bun.spawn> | undefined;
 
   try {
@@ -62,7 +59,6 @@ test("SIGTERM stops the server and exits normally", async () => {
       cwd: projectDir,
       env: {
         ...process.env,
-        DEVIN_GATEWAY_CONFIG_DIR: configDir,
         HOST: "127.0.0.1",
         PORT: "0",
       },
@@ -85,6 +81,5 @@ test("SIGTERM stops the server and exits normally", async () => {
       child.kill("SIGKILL");
       await child.exited;
     }
-    await rm(configDir, { recursive: true, force: true });
   }
 }, 7_000);
