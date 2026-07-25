@@ -3,34 +3,97 @@
   "version": "0.4.0",
   "description": "Expose Devin/Windsurf Cascade API as OpenAI and Anthropic compatible endpoints",
   "license": "MIT",
+  "author": "CaiJingLong",
   "type": "module",
-  "main": "./src/index.ts",
-  "types": "./src/index.ts",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
-    "./proto": "./src/proto.ts",
-    "./models": "./src/models.ts",
-    "./convert": "./src/convert.ts",
-    "./config": "./src/config.ts",
-    "./devin": "./src/devin.ts",
-    "./client": "./src/client.ts",
-    "./server": "./src/server.ts"
+    "./proto": {
+      "types": "./dist/proto.d.ts",
+      "default": "./dist/proto.js"
+    },
+    "./models": {
+      "types": "./dist/models.d.ts",
+      "default": "./dist/models.js"
+    },
+    "./convert": {
+      "types": "./dist/convert.d.ts",
+      "default": "./dist/convert.js"
+    },
+    "./config": {
+      "types": "./dist/config.d.ts",
+      "default": "./dist/config.js"
+    },
+    "./devin": {
+      "types": "./dist/devin.d.ts",
+      "default": "./dist/devin.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "default": "./dist/client.js"
+    },
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    },
+    "./package.json": "./package.json"
   },
-  "files": ["src"],
+  "bin": {
+    "devin-gateway": "./dist/bin/gateway.js",
+    "devin-gateway-login": "./dist/bin/gateway.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "README.zh-CN.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/caijinglong/devin-gateway.git"
+  },
+  "homepage": "https://github.com/caijinglong/devin-gateway#readme",
+  "bugs": {
+    "url": "https://github.com/caijinglong/devin-gateway/issues"
+  },
+  "keywords": [
+    "devin",
+    "windsurf",
+    "cascade",
+    "openai",
+    "anthropic",
+    "gateway",
+    "proxy",
+    "llm",
+    "chat-completions",
+    "cherry-studio"
+  ],
   "scripts": {
     "dev": "bun run --watch src/index.ts",
     "start": "bun run src/index.ts",
     "login": "bun run src/cli/login.ts",
     "login:paste": "bun run src/cli/login.ts --paste",
     "login:status": "bun run src/cli/login.ts --status",
-    "typecheck": "tsc --noEmit"
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run typecheck && bun run build"
   },
   "dependencies": {},
   "devDependencies": {
     "@types/bun": "latest",
+    "@types/node": "latest",
     "typescript": "^5"
   }
 }

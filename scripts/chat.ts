@@ -21,7 +21,7 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { chat } from "../src/client.ts";
+import { chat } from "../src/client.js";
 
 const token = process.env.DEVIN_TOKEN ?? "";
 const prompt = process.env.INPUT_PROMPT ?? "";

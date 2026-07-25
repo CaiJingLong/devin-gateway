@@ -28,7 +28,7 @@ import {
   decodeGetChatMessageResponse,
   ProtoDecoder,
   ProtoEncoder,
-} from "./proto.ts";
+} from "./proto.js";
 
 const DEVIN_API_URL = "https://server.codeium.com";
 const DEVIN_AUTH_PATH = "/exa.auth_pb.AuthService/GetUserJwt";

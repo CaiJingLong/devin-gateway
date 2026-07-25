@@ -14,8 +14,8 @@
  * only when a request omits both headers.
  */
 
-import { streamChat, discoverModels, type ChatStreamEvent } from "./devin.ts";
-import { listModels, type ModelInfo } from "./models.ts";
+import { streamChat, discoverModels, type ChatStreamEvent } from "./devin.js";
+import { listModels, type ModelInfo } from "./models.js";
 import {
   openaiToInternal,
   openaiToolsToDevin,
@@ -28,8 +28,8 @@ import {
   type OpenAITool,
   type AnthropicMessage,
   type AnthropicTool,
-} from "./convert.ts";
-import { StopReason } from "./proto.ts";
+} from "./convert.js";
+import { StopReason } from "./proto.js";
 
 // ─── Config (populated by startServer) ──────────────────────────────────────
 

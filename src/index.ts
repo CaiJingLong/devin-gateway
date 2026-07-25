@@ -11,15 +11,15 @@
  *   import { chat, startServer } from "devin-gateway";
  */
 
-import { startServer } from "./server.ts";
+import { startServer } from "./server.js";
 
-export * from "./proto.ts";
-export * from "./models.ts";
-export * from "./convert.ts";
-export * from "./config.ts";
-export * from "./devin.ts";
-export * from "./client.ts";
-export { startServer, type ServerOptions, type ServerHandle } from "./server.ts";
+export * from "./proto.js";
+export * from "./models.js";
+export * from "./convert.js";
+export * from "./config.js";
+export * from "./devin.js";
+export * from "./client.js";
+export { startServer, type ServerOptions, type ServerHandle } from "./server.js";
 
 if (import.meta.main) {
   await startServer();

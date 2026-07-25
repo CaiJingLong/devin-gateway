@@ -11,7 +11,7 @@ import {
   type ImageData,
   ChatMessageSource,
   StopReason,
-} from "./proto.ts";
+} from "./proto.js";
 
 // ─── Common internal message shape ───────────────────────────────────────────
 

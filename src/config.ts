@@ -14,14 +14,17 @@ export const TOKEN_FILE = join(CONFIG_DIR, "token");
 
 export async function readToken(): Promise<string> {
   try {
-    return (await Bun.file(TOKEN_FILE).text()).trim();
+    const { readFile } = await import("node:fs/promises");
+    return (await readFile(TOKEN_FILE, "utf8")).trim();
   } catch {
     return "";
   }
 }
 
 export async function writeToken(token: string): Promise<void> {
-  await Bun.write(TOKEN_FILE, token.trim());
+  const { writeFile, mkdir } = await import("node:fs/promises");
+  await mkdir(CONFIG_DIR, { recursive: true });
+  await writeFile(TOKEN_FILE, token.trim(), "utf8");
 }
 
 export { CONFIG_DIR };

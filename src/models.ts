@@ -209,6 +209,3 @@ export function listModels(): ModelInfo[] {
   return MODELS;
 }
 
-export function listModels(): ModelInfo[] {
-  return MODELS;
-}

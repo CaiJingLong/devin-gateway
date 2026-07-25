@@ -7,8 +7,8 @@
  * — this keeps the call Node-compatible when run outside Bun.
  */
 
-import { streamChat } from "./devin.ts";
-import { readToken } from "./config.ts";
+import { streamChat } from "./devin.js";
+import { readToken } from "./config.js";
 import {
   openaiToInternal,
   openaiToolsToDevin,
@@ -16,7 +16,7 @@ import {
   stopReasonToOpenAI,
   type OpenAIMessage,
   type OpenAITool,
-} from "./convert.ts";
+} from "./convert.js";
 
 export interface ChatOptions {
   /** Devin session token; falls back to `DEVIN_API_KEY` env or the token file. */
