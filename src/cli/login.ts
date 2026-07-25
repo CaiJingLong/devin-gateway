@@ -81,8 +81,16 @@ export async function runLogin(argv: string[]): Promise<void> {
       process.exit(1);
     }
   } else {
-    // Auto mode: start local callback server and wait
-    const callbackPromise = startCallbackServer(session);
+    // Auto mode: start local callback server, wait for it to be listening, then
+    // open the browser — so the callback URL is reachable the instant it loads.
+    const { ready, token } = startCallbackServer(session);
+
+    try {
+      await ready; // throws on EADDRINUSE / other listen failures
+    } catch (err) {
+      console.error(`Login failed: ${String((err as Error).message ?? err)}`);
+      process.exit(1);
+    }
 
     // Try to open the browser automatically
     try {
@@ -103,8 +111,8 @@ export async function runLogin(argv: string[]): Promise<void> {
     console.log("");
 
     try {
-      const token = await callbackPromise;
-      await finishLogin(token, printOnly);
+      const t = await token;
+      await finishLogin(t, printOnly);
     } catch (err) {
       console.error(`Login failed: ${String((err as Error).message ?? err)}`);
       process.exit(1);
@@ -132,13 +140,24 @@ async function finishLogin(token: string, printOnly: boolean): Promise<void> {
   console.log("");
 }
 
-async function startCallbackServer(session: { state: string; verifier: string }): Promise<string> {
-  let resolve!: (v: string) => void;
-  let reject!: (e: unknown) => void;
-  const promise = new Promise<string>((res, rej) => {
-    resolve = res;
-    reject = rej;
+function startCallbackServer(session: {
+  state: string;
+  verifier: string;
+}): { ready: Promise<void>; token: Promise<string> } {
+  let resolveToken!: (v: string) => void;
+  let rejectToken!: (e: unknown) => void;
+  const token = new Promise<string>((res, rej) => {
+    resolveToken = res;
+    rejectToken = rej;
   });
+
+  let resolveReady!: () => void;
+  let rejectReady!: (e: unknown) => void;
+  const ready = new Promise<void>((res, rej) => {
+    resolveReady = res;
+    rejectReady = rej;
+  });
+
   let settled = false;
   let server: Server;
 
@@ -146,9 +165,18 @@ async function startCallbackServer(session: { state: string; verifier: string })
     if (!settled) {
       settled = true;
       server.close();
-      reject(new Error("Login timed out"));
+      rejectToken(new Error("Login timed out"));
     }
   }, TIMEOUT_MS);
+
+  const fail = (err: unknown): void => {
+    if (!settled) {
+      settled = true;
+      clearTimeout(timeout);
+      server.close();
+      rejectToken(err);
+    }
+  };
 
   server = createServer((req, res) => {
     const url = new URL(req.url ?? "", `http://127.0.0.1:${CALLBACK_PORT}`);
@@ -169,52 +197,49 @@ async function startCallbackServer(session: { state: string; verifier: string })
 
     if (error) {
       const desc = url.searchParams.get("error_description") ?? error;
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        server.close();
-        reject(new Error(`Authorization failed: ${desc}`));
-      }
+      fail(new Error(`Authorization failed: ${desc}`));
       sendHtml(`❌ Login failed: ${desc}`);
       return;
     }
 
     if (!code || state !== session.state) {
-      if (!settled) {
-        settled = true;
-        clearTimeout(timeout);
-        server.close();
-        reject(new Error("Invalid callback: missing code or state mismatch"));
-      }
+      fail(new Error("Invalid callback: missing code or state mismatch"));
       sendHtml("❌ Invalid callback");
       return;
     }
 
     // Exchange token
     exchangeToken(code, session.verifier)
-      .then((token) => {
+      .then((t) => {
         if (!settled) {
           settled = true;
           clearTimeout(timeout);
           server.close();
-          resolve(token);
+          resolveToken(t);
         }
       })
-      .catch((err) => {
-        if (!settled) {
-          settled = true;
-          clearTimeout(timeout);
-          server.close();
-          reject(err);
-        }
-      });
+      .catch(fail);
 
     sendHtml("✅ Login successful! You can close this tab.");
   });
 
+  server.on("error", (err: NodeJS.ErrnoException) => {
+    if (err.code === "EADDRINUSE") {
+      rejectReady(
+        new Error(
+          `Port ${CALLBACK_PORT} is already in use (another login in progress?). Free it and retry.`,
+        ),
+      );
+    } else {
+      rejectReady(err);
+    }
+    fail(err);
+  });
+
+  server.once("listening", () => resolveReady());
   server.listen(CALLBACK_PORT, "127.0.0.1");
 
-  return promise;
+  return { ready, token };
 }
 
 function htmlBody(message: string): string {
