@@ -86,7 +86,7 @@ Organization-level secrets work too. Rotate the token periodically.
 
 ### 3. Pin the workflow ref
 
-Pin `@<ref>` in `uses:` to a specific tag (e.g. `@v0.4.0`) or commit SHA so upstream changes don't surprise your CI. `@main` is fine for early experimentation but not recommended long-term.
+Pin `@<ref>` in `uses:` to a specific tag (e.g. `@v0.4.1`) or commit SHA so upstream changes don't surprise your CI. `@main` is fine for early experimentation but not recommended long-term.
 
 ## Inputs
 
@@ -124,7 +124,7 @@ on:
 
 jobs:
   ask-devin:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -156,7 +156,7 @@ permissions:
 
 jobs:
   review:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -198,7 +198,7 @@ on:
 
 jobs:
   generate:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -221,7 +221,7 @@ on:
 
 jobs:
   ask:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -235,7 +235,7 @@ jobs:
 ```yaml
 jobs:
   summarize:
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:
@@ -243,7 +243,7 @@ jobs:
 
   translate:
     needs: summarize
-    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.0
+    uses: caijinglong/devin-gateway/.github/workflows/devin-chat.yml@v0.4.1
     secrets:
       DEVIN_TOKEN: ${{ secrets.DEVIN_TOKEN }}
     with:

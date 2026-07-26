@@ -143,6 +143,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       role: "assistant",
       content: text || null,
     };
+    if (thinking) message.reasoning_content = thinking;
     if (hasToolCalls) {
       message.content = null;
       message.tool_calls = toolCalls.map((tc, i) => ({
@@ -189,12 +190,17 @@ function streamOpenAIChat(
       const encoder = new TextEncoder();
       const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
+      let upstreamChunks = 0;
+      let sentChunks = 0;
+      const log = (msg: string) => console.error(`[stream/chat ${completionId}] ${msg}`);
+
       try {
         // Initial role chunk
         send({
           id: completionId, object: "chat.completion.chunk", created, model: modelId,
           choices: [{ index: 0, delta: { role: "assistant" }, finish_reason: null }],
         });
+        sentChunks++;
 
         let hasToolCalls = false;
         let stopReason = 0;
@@ -204,11 +210,22 @@ function streamOpenAIChat(
           maxTokens, temperature, topP, stopSequences, cascadeId,
           baseUrl: DEVIN_BASE_URL || undefined,
         })) {
+          upstreamChunks++;
           if (ev.type === "text" && ev.deltaText) {
             send({
               id: completionId, object: "chat.completion.chunk", created, model: modelId,
               choices: [{ index: 0, delta: { content: ev.deltaText }, finish_reason: null }],
             });
+            sentChunks++;
+          } else if (ev.type === "thinking" && ev.deltaThinking) {
+            // Forward reasoning tokens as reasoning_content so thinking models
+            // keep the SSE stream alive while reasoning (Bun closes idle
+            // streaming connections after idleTimeout seconds of silence).
+            send({
+              id: completionId, object: "chat.completion.chunk", created, model: modelId,
+              choices: [{ index: 0, delta: { reasoning_content: ev.deltaThinking }, finish_reason: null }],
+            });
+            sentChunks++;
           } else if (ev.type === "toolcall" && ev.toolCalls) {
             hasToolCalls = true;
             for (const tc of ev.toolCalls) {
@@ -225,11 +242,14 @@ function streamOpenAIChat(
                   finish_reason: null,
                 }],
               });
+              sentChunks++;
             }
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
             send({ error: { message: ev.error, type: "api_error" } });
+            sentChunks++;
+            log(`upstream error: ${ev.error}`);
           }
         }
 
@@ -237,9 +257,13 @@ function streamOpenAIChat(
           id: completionId, object: "chat.completion.chunk", created, model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: stopReasonToOpenAI(stopReason, hasToolCalls) }],
         });
+        sentChunks++;
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+        log(`done — upstream chunks: ${upstreamChunks}, client chunks: ${sentChunks}`);
       } catch (err) {
         send({ error: { message: String((err as Error).message ?? err), type: "api_error" } });
+        sentChunks++;
+        log(`exception after upstream=${upstreamChunks} client=${sentChunks}: ${(err as Error).message ?? err}`);
       } finally {
         controller.close();
       }
@@ -383,46 +407,99 @@ function streamOpenAIResponses(
         });
 
         const messageId = `msg_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
-        send("response.output_item.added", {
-          type: "response.output_item.added",
-          output_index: 0,
-          item: { type: "message", id: messageId, status: "in_progress", role: "assistant", content: [] },
-        });
-        send("response.content_part.added", {
-          type: "response.content_part.added",
-          item_id: messageId, output_index: 0, content_index: 0,
-          part: { type: "output_text", text: "" },
-        });
-
+        const reasoningId = `rs_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
+        let reasoningStarted = false;
+        let messageStarted = false;
         let fullText = "";
+        let outputIndex = 0;
+        const outputItems: unknown[] = [];
+
+        const startMessage = () => {
+          messageStarted = true;
+          send("response.output_item.added", {
+            type: "response.output_item.added",
+            output_index: outputIndex,
+            item: { type: "message", id: messageId, status: "in_progress", role: "assistant", content: [] },
+          });
+          send("response.content_part.added", {
+            type: "response.content_part.added",
+            item_id: messageId, output_index: outputIndex, content_index: 0,
+            part: { type: "output_text", text: "" },
+          });
+        };
+
         for await (const ev of streamChat({
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
           maxTokens, temperature, topP, cascadeId, baseUrl: DEVIN_BASE_URL || undefined,
         })) {
-          if (ev.type === "text" && ev.deltaText) {
+          if (ev.type === "thinking" && ev.deltaThinking) {
+            // Forward reasoning as a summary_text part so thinking models keep
+            // the SSE stream alive (Bun closes idle streams after idleTimeout).
+            if (!reasoningStarted) {
+              reasoningStarted = true;
+              send("response.output_item.added", {
+                type: "response.output_item.added",
+                output_index: outputIndex,
+                item: { type: "reasoning", id: reasoningId, status: "in_progress", summary: [] },
+              });
+            }
+            send("response.reasoning_summary_text.delta", {
+              type: "response.reasoning_summary_text.delta",
+              item_id: reasoningId, output_index: outputIndex, delta: ev.deltaThinking,
+            });
+          } else if (ev.type === "text" && ev.deltaText) {
+            if (reasoningStarted) {
+              send("response.reasoning_summary_text.done", {
+                type: "response.reasoning_summary_text.done",
+                item_id: reasoningId, output_index: outputIndex,
+              });
+              send("response.output_item.done", {
+                type: "response.output_item.done",
+                output_index: outputIndex,
+                item: { type: "reasoning", id: reasoningId, status: "completed", summary: [] },
+              });
+              outputItems.push({ type: "reasoning", id: reasoningId, status: "completed", summary: [] });
+              reasoningStarted = false;
+              outputIndex++;
+            }
+            if (!messageStarted) startMessage();
             fullText += ev.deltaText;
             send("response.output_text.delta", {
               type: "response.output_text.delta",
-              item_id: messageId, output_index: 0, content_index: 0, delta: ev.deltaText,
+              item_id: messageId, output_index: outputIndex, content_index: 0, delta: ev.deltaText,
             });
           } else if (ev.type === "error") {
             send("response.failed", { type: "response.failed", error: { message: ev.error } });
           }
         }
 
-        send("response.content_part.done", {
-          type: "response.content_part.done",
-          item_id: messageId, output_index: 0, content_index: 0,
-          part: { type: "output_text", text: fullText },
-        });
-        send("response.output_item.done", {
-          type: "response.output_item.done",
-          output_index: 0,
-          item: { type: "message", id: messageId, status: "completed", role: "assistant", content: [{ type: "output_text", text: fullText }] },
-        });
+        if (reasoningStarted) {
+          send("response.output_item.done", {
+            type: "response.output_item.done",
+            output_index: outputIndex,
+            item: { type: "reasoning", id: reasoningId, status: "completed", summary: [] },
+          });
+          outputItems.push({ type: "reasoning", id: reasoningId, status: "completed", summary: [] });
+          outputIndex++;
+        }
+
+        if (messageStarted) {
+          send("response.content_part.done", {
+            type: "response.content_part.done",
+            item_id: messageId, output_index: outputIndex, content_index: 0,
+            part: { type: "output_text", text: fullText },
+          });
+          send("response.output_item.done", {
+            type: "response.output_item.done",
+            output_index: outputIndex,
+            item: { type: "message", id: messageId, status: "completed", role: "assistant", content: [{ type: "output_text", text: fullText }] },
+          });
+          outputItems.push({ type: "message", id: messageId, status: "completed", role: "assistant", content: [{ type: "output_text", text: fullText }] });
+        }
+
         send("response.completed", {
           type: "response.completed",
-          response: { id: responseId, object: "response", created_at: created, model: modelId, status: "completed", output: [{ type: "message", id: messageId, status: "completed", role: "assistant", content: [{ type: "output_text", text: fullText }] }] },
+          response: { id: responseId, object: "response", created_at: created, model: modelId, status: "completed", output: outputItems },
         });
       } catch (err) {
         send("response.failed", { type: "response.failed", error: { message: String((err as Error).message ?? err) } });
@@ -735,6 +812,10 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
   const server = Bun.serve({
     port: PORT,
     hostname: HOST,
+    // Bun closes idle streaming connections after 10s by default. Thinking
+    // models can reason for tens of seconds before emitting text, so raise the
+    // ceiling (255 is Bun's max) to keep SSE streams alive through quiet gaps.
+    idleTimeout: 255,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const method = req.method;

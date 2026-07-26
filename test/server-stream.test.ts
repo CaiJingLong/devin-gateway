@@ -257,6 +257,63 @@ describe("streamOpenAIChat tool_calls branch", () => {
   });
 });
 
+describe("streamOpenAIChat thinking/reasoning forwarding", () => {
+  test("forwards thinking chunks as reasoning_content and still emits [DONE]", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([
+          dataFrame({ thinking: "reasoning part 1" }),
+          dataFrame({ thinking: "reasoning part 2" }),
+          dataFrame({ text: "answer" }),
+          dataFrame({ stopReason: 1 }),
+        ]),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          stream: true,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const datas = events.map((e) => e.data);
+
+      // Final marker present
+      expect(datas[datas.length - 1]).toBe("[DONE]");
+
+      const parsed = datas
+        .filter((d) => d !== "[DONE]")
+        .map((d) => JSON.parse(d));
+
+      // Reasoning chunks forwarded as reasoning_content deltas
+      const reasoning = parsed
+        .filter((o) => o?.choices?.[0]?.delta?.reasoning_content)
+        .map((o) => o.choices[0].delta.reasoning_content);
+      expect(reasoning).toEqual(["reasoning part 1", "reasoning part 2"]);
+
+      // Text content forwarded
+      const content = parsed
+        .filter((o) => o?.choices?.[0]?.delta?.content)
+        .map((o) => o.choices[0].delta.content);
+      expect(content).toEqual(["answer"]);
+
+      // No chunk carries both reasoning_content and content (kept separate)
+      for (const o of parsed) {
+        const delta = o?.choices?.[0]?.delta ?? {};
+        expect(!(delta.reasoning_content && delta.content)).toBe(true);
+      }
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+});
+
 describe("streamOpenAIChat error event", () => {
   test("surfaces a Connect trailer error as an SSE error data chunk", async () => {
     const upstream = startUpstream({

@@ -55,7 +55,7 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/caijinglong/devin-gateway:0.4.0
+  ghcr.io/caijinglong/devin-gateway:0.4.1
 
 客户端在每次请求中携带自己的 Devin token，因此无需挂载 token 卷。仅当你需要服务端兜底时，才设置 `DEVIN_API_KEY`。
 
@@ -66,7 +66,7 @@ docker run -d \
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.4.0
+    image: ghcr.io/caijinglong/devin-gateway:0.4.1
     container_name: devin-gateway
     restart: unless-stopped
     ports:

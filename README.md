@@ -55,7 +55,7 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/caijinglong/devin-gateway:0.4.0
+  ghcr.io/caijinglong/devin-gateway:0.4.1
 ```
 
 Clients send their own Devin token per request, so no token volume is needed. Set `DEVIN_API_KEY` only if you want a server-side fallback.
@@ -67,7 +67,7 @@ Create `compose.yaml`:
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.4.0
+    image: ghcr.io/caijinglong/devin-gateway:0.4.1
     container_name: devin-gateway
     restart: unless-stopped
     ports:
