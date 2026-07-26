@@ -18,3 +18,6 @@ coverage/
 .DS_Store
 .idea/
 .vscode/
+
+# Local agent instructions (not committed; imported via @AGENTS.local.md in AGENTS.md)
+AGENTS.local.md
