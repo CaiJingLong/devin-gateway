@@ -13,6 +13,7 @@ import { gzipSync, gunzipSync } from "node:zlib";
 import {
   type ChatMessagePrompt,
   type ChatToolCall,
+  type ChatToolChoice,
   type ChatToolDefinition,
   type CompletionConfiguration,
   type GetChatMessageRequest,
@@ -110,6 +111,8 @@ export interface ChatParams {
   cascadeId?: string;
   baseUrl?: string;
   signal?: AbortSignal;
+  /** Tool choice override; defaults to `{ optionName: "auto" }`. */
+  toolChoice?: ChatToolChoice;
 }
 
 export interface ChatStreamEvent {
@@ -156,7 +159,7 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
     configuration,
     tools: params.tools,
     disableParallelToolCalls: true,
-    toolChoice: { optionName: "auto" },
+    toolChoice: params.toolChoice ?? { optionName: "auto" },
     cascadeId,
     executionId: crypto.randomUUID(),
   };
@@ -262,13 +265,14 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
 }
 
 // ─── Model discovery (optional) ──────────────────────────────────────────────
-
 export interface DiscoveredModel {
   id: string;
   name: string;
   contextWindow: number;
   maxTokens: number;
   reasoning: boolean;
+  /** True when the model accepts image inputs. */
+  supportsImages: boolean;
 }
 
 const GET_CLI_MODEL_CONFIGS_PATH = "/exa.api_server_pb.ApiServerService/GetCliModelConfigs";
@@ -326,8 +330,36 @@ function parseCliModelConfigs(data: Uint8Array): DiscoveredModel[] {
       decoder.skip(wire);
     }
   }
-
   return models;
+}
+
+
+/** Label wording that implies a thinking / reasoning-effort variant. */
+const REASONING_LABEL_PATTERN = /think|thinking|minimal|high|medium|low|xhigh|max|reasoning/i;
+const NO_REASONING_LABEL_PATTERN = /\bno thinking\b/i;
+
+/** Parse `ModelFeatures` (field 6 of `ModelInfo`) for `supports_thinking` (field 15). */
+function parseModelFeaturesThinking(decoder: ProtoDecoder): boolean {
+  while (!decoder.done) {
+    const { field, wire } = decoder.readTag();
+    if (field === 15 && wire === 0) {
+      return decoder.readVarint() !== 0n;
+    }
+    decoder.skip(wire);
+  }
+  return false;
+}
+
+/** Parse `ModelInfo` (field 23 of `ClientModelConfig`) for its `model_features` (field 6). */
+function parseModelInfoThinking(decoder: ProtoDecoder): boolean {
+  while (!decoder.done) {
+    const { field, wire } = decoder.readTag();
+    if (field === 6 && wire === 2) {
+      return decoder.readMessage(parseModelFeaturesThinking);
+    }
+    decoder.skip(wire);
+  }
+  return false;
 }
 
 function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
@@ -335,6 +367,8 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
   let label = "";
   let disabled = false;
   let configuredMaxTokens = 0;
+  let supportsImages = false;
+  let supportsThinking = false;
 
   while (!decoder.done) {
     const { field, wire } = decoder.readTag();
@@ -342,10 +376,14 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
       label = decoder.readString();
     } else if (field === 4 && wire === 0) {
       disabled = decoder.readVarint() !== 0n;
+    } else if (field === 5 && wire === 0) {
+      supportsImages = decoder.readVarint() !== 0n;
     } else if (field === 18 && wire === 0) {
       configuredMaxTokens = Number(decoder.readVarint());
     } else if (field === 22 && wire === 2) {
       id = decoder.readString();
+    } else if (field === 23 && wire === 2) {
+      supportsThinking = decoder.readMessage(parseModelInfoThinking);
     } else {
       decoder.skip(wire);
     }
@@ -353,6 +391,8 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
 
   if (disabled || !id.trim()) return null;
 
+  const reasoning = !NO_REASONING_LABEL_PATTERN.test(label) &&
+    (supportsThinking || REASONING_LABEL_PATTERN.test(label));
   const contextWindow = configuredMaxTokens > 0 ? configuredMaxTokens : 200_000;
   const maxTokens = Math.min(configuredMaxTokens > 0 ? configuredMaxTokens : 64_000, 64_000);
   return {
@@ -360,6 +400,7 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
     name: label.trim() || id.trim(),
     contextWindow,
     maxTokens,
-    reasoning: true,
+    reasoning,
+    supportsImages,
   };
 }

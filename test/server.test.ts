@@ -132,6 +132,33 @@ function decodeChatRequestPrompt(body: Uint8Array): string {
   return prompt;
 }
 
+/** Decode the `toolChoice` (field 12) from a Connect-framed, gzipped GetChatMessageRequest. */
+function decodeChatRequestToolChoice(body: Uint8Array): { optionName?: string; toolName?: string } | undefined {
+  const flag = body[0];
+  const len = ((body[1] << 24) | (body[2] << 16) | (body[3] << 8) | body[4]) >>> 0;
+  const payload = body.subarray(5, 5 + len);
+  const raw = flag & 0x01 ? gunzipSync(payload) : payload;
+  const d = new ProtoDecoder(raw);
+  while (!d.done) {
+    const { field, wire } = d.readTag();
+    if (field === 12 && wire === 2) {
+      return d.readMessage((sub) => {
+        let optionName: string | undefined;
+        let toolName: string | undefined;
+        while (!sub.done) {
+          const { field: f, wire: w } = sub.readTag();
+          if (f === 1 && w === 2) optionName = sub.readString();
+          else if (f === 2 && w === 2) toolName = sub.readString();
+          else sub.skip(w);
+        }
+        return { optionName, toolName };
+      });
+    }
+    d.skip(wire);
+  }
+  return undefined;
+}
+
 // ─── Upstream mock (fake Devin API) ──────────────────────────────────────────
 
 interface UpstreamOptions {
@@ -963,6 +990,182 @@ describe("502 error mapping", () => {
       expect(res.status).toBe(502);
       const body = await res.json();
       expect(body.error.message).toContain("fail");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+});
+
+// ─── tool_choice wiring ─────────────────────────────────────────────────────
+
+describe("tool_choice wiring", () => {
+  test("OpenAI 'auto' → Devin { optionName: 'auto' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", messages: [{ role: "user", content: "hi" }],
+          tool_choice: "auto",
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "auto" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("OpenAI 'required' → Devin { optionName: 'any' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", messages: [{ role: "user", content: "hi" }],
+          tool_choice: "required",
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "any" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("OpenAI { type: 'function', function: { name } } → Devin { toolName }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", messages: [{ role: "user", content: "hi" }],
+          tool_choice: { type: "function", function: { name: "get_weather" } },
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ toolName: "get_weather" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("OpenAI 'none' → Devin { optionName: 'none' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", messages: [{ role: "user", content: "hi" }],
+          tool_choice: "none",
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "none" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("OpenAI no tool_choice → default { optionName: 'auto' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "auto" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("Anthropic { type: 'any' } → Devin { optionName: 'any' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", max_tokens: 100, messages: [{ role: "user", content: "hi" }],
+          tool_choice: { type: "any" },
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "any" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("Anthropic { type: 'tool', name } → Devin { toolName }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", max_tokens: 100, messages: [{ role: "user", content: "hi" }],
+          tool_choice: { type: "tool", name: "search" },
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ toolName: "search" });
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("Anthropic no tool_choice → default { optionName: 'auto' }", async () => {
+    let captured: Uint8Array | undefined;
+    const upstream = startUpstream({
+      captureChatRequest: (b) => { captured = b; },
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "tok");
+    try {
+      await fetch(`${url}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: "Bearer tok" },
+        body: JSON.stringify({
+          model: "m", max_tokens: 100, messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(decodeChatRequestToolChoice(captured!)).toEqual({ optionName: "auto" });
     } finally {
       await cleanup();
       await upstream.stop();

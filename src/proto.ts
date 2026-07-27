@@ -267,12 +267,21 @@ export interface ChatToolCall {
   id: string;
   name: string;
   argumentsJson: string;
+  /** Raw arguments text when JSON parsing failed upstream. */
+  invalidJsonStr?: string;
+  /** Error message from upstream JSON parse failure. */
+  invalidJsonErr?: string;
+  /** True when the call targets a custom (non-built-in) tool. */
+  isCustomToolCall?: boolean;
 }
 
 function encodeChatToolCall(e: ProtoEncoder, tc: ChatToolCall): void {
   e.string(1, tc.id);
   e.string(2, tc.name);
   e.string(3, tc.argumentsJson);
+  e.string(4, tc.invalidJsonStr);
+  e.string(5, tc.invalidJsonErr);
+  e.bool(6, tc.isCustomToolCall);
 }
 
 export function decodeChatToolCall(d: ProtoDecoder): ChatToolCall {
@@ -288,6 +297,15 @@ export function decodeChatToolCall(d: ProtoDecoder): ChatToolCall {
         break;
       case 3:
         tc.argumentsJson = d.readString();
+        break;
+      case 4:
+        tc.invalidJsonStr = d.readString();
+        break;
+      case 5:
+        tc.invalidJsonErr = d.readString();
+        break;
+      case 6:
+        tc.isCustomToolCall = d.readVarint() !== 0n;
         break;
       default:
         d.skip(wire);
@@ -436,6 +454,10 @@ export interface ModelUsageStats {
   outputTokens: number;
   cacheWriteTokens: number;
   cacheReadTokens: number;
+  /** Server message id associated with this usage record. */
+  messageId?: string;
+  /** Model uid the server billed this turn under. */
+  modelUid?: string;
 }
 
 export interface GetChatMessageResponse {
@@ -446,6 +468,20 @@ export interface GetChatMessageResponse {
   usage: ModelUsageStats | null;
   deltaThinking: string;
   deltaSignature: string;
+  /** True when the server redacted the delta text. */
+  redact?: boolean;
+  /** True when the server redacted the thinking content. */
+  thinkingRedacted?: boolean;
+  /** Signature type tag accompanying `deltaSignature` (e.g. provider-specific). */
+  deltaSignatureType?: string;
+  /** Server-assigned output id; threads assistant turns across requests. */
+  outputId?: string;
+  /** Server request id for debugging/log correlation. */
+  requestId?: string;
+  /** The model uid actually used (may differ from the requested uid). */
+  actualModelUid?: string;
+  /** Credit cost charged for this delta. */
+  creditCost?: number;
 }
 
 export function decodeGetChatMessageResponse(data: Uint8Array): GetChatMessageResponse {
@@ -477,11 +513,32 @@ export function decodeGetChatMessageResponse(data: Uint8Array): GetChatMessageRe
       case 7:
         res.usage = d.readMessage(decodeModelUsageStats);
         break;
+      case 8:
+        res.redact = d.readVarint() !== 0n;
+        break;
       case 9:
         res.deltaThinking = d.readString();
         break;
       case 10:
         res.deltaSignature = d.readString();
+        break;
+      case 11:
+        res.thinkingRedacted = d.readVarint() !== 0n;
+        break;
+      case 14:
+        res.creditCost = Number(d.readVarint());
+        break;
+      case 15:
+        res.outputId = d.readString();
+        break;
+      case 17:
+        res.requestId = d.readString();
+        break;
+      case 21:
+        res.deltaSignatureType = d.readString();
+        break;
+      case 23:
+        res.actualModelUid = d.readString();
         break;
       default:
         d.skip(wire);
@@ -511,6 +568,12 @@ function decodeModelUsageStats(d: ProtoDecoder): ModelUsageStats {
         break;
       case 5:
         s.cacheReadTokens = Number(d.readVarint());
+        break;
+      case 7:
+        s.messageId = d.readString();
+        break;
+      case 9:
+        s.modelUid = d.readString();
         break;
       default:
         d.skip(wire);

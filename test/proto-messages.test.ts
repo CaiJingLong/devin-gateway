@@ -56,8 +56,12 @@ function encodeMessage(field: number, payload: number[]): number[] {
   return [...encodeTag(field, 2), ...encodeVarint(payload.length), ...payload];
 }
 
-function encodeChatToolCallBytes(tc: ChatToolCall): number[] {
-  return [...encodeString(1, tc.id), ...encodeString(2, tc.name), ...encodeString(3, tc.argumentsJson)];
+function encodeChatToolCallBytes(tc: Partial<ChatToolCall> & { id: string; name: string; argumentsJson: string }): number[] {
+  const bytes = [...encodeString(1, tc.id), ...encodeString(2, tc.name), ...encodeString(3, tc.argumentsJson)];
+  if (tc.invalidJsonStr) bytes.push(...encodeString(4, tc.invalidJsonStr));
+  if (tc.invalidJsonErr) bytes.push(...encodeString(5, tc.invalidJsonErr));
+  if (tc.isCustomToolCall) bytes.push(...encodeUint32(6, 1));
+  return bytes;
 }
 
 function encodeModelUsageStatsBytes(s: {
@@ -65,13 +69,18 @@ function encodeModelUsageStatsBytes(s: {
   outputTokens: number;
   cacheWriteTokens: number;
   cacheReadTokens: number;
+  messageId?: string;
+  modelUid?: string;
 }): number[] {
-  return [
+  const bytes = [
     ...encodeUint32(2, s.inputTokens),
     ...encodeUint32(3, s.outputTokens),
     ...encodeUint32(4, s.cacheWriteTokens),
     ...encodeUint32(5, s.cacheReadTokens),
   ];
+  if (s.messageId) bytes.push(...encodeString(7, s.messageId));
+  if (s.modelUid) bytes.push(...encodeString(9, s.modelUid));
+  return bytes;
 }
 
 // ─── Metadata / GetUserJwt ──────────────────────────────────────────────────
@@ -505,9 +514,9 @@ describe("decodeGetChatMessageResponse", () => {
     expect(decodeGetChatMessageResponse(bytes).deltaText).toBe("after-varint");
   });
 
-  test("unknown fixed64 field (field 8) is skipped, deltaText still parsed", () => {
+  test("unknown fixed64 field (field 99) is skipped, deltaText still parsed", () => {
     const bytes = Uint8Array.from([
-      ...encodeFixed64(8, [1, 2, 3, 4, 5, 6, 7, 8]),
+      ...encodeFixed64(99, [1, 2, 3, 4, 5, 6, 7, 8]),
       ...encodeString(3, "after-fixed64"),
     ]);
     expect(decodeGetChatMessageResponse(bytes).deltaText).toBe("after-fixed64");
@@ -516,7 +525,7 @@ describe("decodeGetChatMessageResponse", () => {
   test("full response with mixed known and unknown fields", () => {
     const bytes = Uint8Array.from([
       ...encodeString(1, "msg-full"),
-      ...encodeUint32(4, 999), // unknown varint
+      ...encodeUint32(4, 999), // unknown varint (field 4 is not in the response schema)
       ...encodeString(3, "text"),
       ...encodeMessage(6, encodeChatToolCallBytes({ id: "tc", name: "tool", argumentsJson: '{"x":1}' })),
       ...encodeMessage(7, encodeModelUsageStatsBytes({
@@ -525,7 +534,7 @@ describe("decodeGetChatMessageResponse", () => {
         cacheWriteTokens: 0,
         cacheReadTokens: 0,
       })),
-      ...encodeFixed64(8, [0, 0, 0, 0, 0, 0, 0, 0]), // unknown fixed64
+      ...encodeFixed64(99, [0, 0, 0, 0, 0, 0, 0, 0]), // unknown fixed64
       ...encodeUint32(5, StopReason.FUNCTION_CALL),
       ...encodeString(9, "think"),
       ...encodeString(10, "sig"),
@@ -586,5 +595,112 @@ describe("ModelUsageStats decoding", () => {
     expect(usage.outputTokens).toBe(222);
     expect(usage.cacheWriteTokens).toBe(0);
     expect(usage.cacheReadTokens).toBe(0);
+  });
+});
+
+// ─── New GetChatMessageResponse fields ──────────────────────────────────────
+
+describe("decodeGetChatMessageResponse extended fields", () => {
+  test("redact (field 8) and thinkingRedacted (field 11) are decoded as booleans", () => {
+    const bytes = Uint8Array.from([
+      ...encodeUint32(8, 1), // redact = true
+      ...encodeUint32(11, 1), // thinkingRedacted = true
+      ...encodeString(3, "text"),
+    ]);
+    const res = decodeGetChatMessageResponse(bytes);
+    expect(res.redact).toBe(true);
+    expect(res.thinkingRedacted).toBe(true);
+    expect(res.deltaText).toBe("text");
+  });
+
+  test("creditCost (field 14) is decoded as number", () => {
+    const bytes = Uint8Array.from([...encodeUint32(14, 42), ...encodeString(1, "m")]);
+    const res = decodeGetChatMessageResponse(bytes);
+    expect(res.creditCost).toBe(42);
+    expect(res.messageId).toBe("m");
+  });
+
+  test("outputId (field 15) and requestId (field 17) are decoded as strings", () => {
+    const bytes = Uint8Array.from([
+      ...encodeString(15, "out-123"),
+      ...encodeString(17, "req-456"),
+    ]);
+    const res = decodeGetChatMessageResponse(bytes);
+    expect(res.outputId).toBe("out-123");
+    expect(res.requestId).toBe("req-456");
+  });
+
+  test("deltaSignatureType (field 21) and actualModelUid (field 23) are decoded", () => {
+    const bytes = Uint8Array.from([
+      ...encodeString(21, "openai"),
+      ...encodeString(23, "gpt-4o-2024"),
+    ]);
+    const res = decodeGetChatMessageResponse(bytes);
+    expect(res.deltaSignatureType).toBe("openai");
+    expect(res.actualModelUid).toBe("gpt-4o-2024");
+  });
+
+  test("redact=false (field 8 varint 0) is decoded as false", () => {
+    const bytes = Uint8Array.from([...encodeUint32(8, 0), ...encodeString(3, "x")]);
+    const res = decodeGetChatMessageResponse(bytes);
+    expect(res.redact).toBe(false);
+  });
+});
+
+// ─── ChatToolCall extended fields ───────────────────────────────────────────
+
+describe("decodeChatToolCall extended fields", () => {
+  test("invalidJsonStr (field 4) and invalidJsonErr (field 5) are decoded", () => {
+    const bytes = Uint8Array.from(encodeChatToolCallBytes({
+      id: "tc1", name: "tool", argumentsJson: "",
+      invalidJsonStr: "{broken",
+      invalidJsonErr: "unexpected token",
+    }));
+    const tc = decodeChatToolCall(new ProtoDecoder(bytes));
+    expect(tc.invalidJsonStr).toBe("{broken");
+    expect(tc.invalidJsonErr).toBe("unexpected token");
+  });
+
+  test("isCustomToolCall (field 6) is decoded as boolean", () => {
+    const bytes = Uint8Array.from(encodeChatToolCallBytes({
+      id: "tc2", name: "custom", argumentsJson: "{}", isCustomToolCall: true,
+    }));
+    const tc = decodeChatToolCall(new ProtoDecoder(bytes));
+    expect(tc.isCustomToolCall).toBe(true);
+  });
+
+  test("isCustomToolCall absent → undefined", () => {
+    const bytes = Uint8Array.from(encodeChatToolCallBytes({
+      id: "tc3", name: "builtin", argumentsJson: "{}",
+    }));
+    const tc = decodeChatToolCall(new ProtoDecoder(bytes));
+    expect(tc.isCustomToolCall).toBeUndefined();
+  });
+});
+
+// ─── ModelUsageStats extended fields ────────────────────────────────────────
+
+describe("ModelUsageStats extended fields", () => {
+  test("messageId (field 7) and modelUid (field 9) are decoded", () => {
+    const bytes = Uint8Array.from([
+      ...encodeMessage(7, encodeModelUsageStatsBytes({
+        inputTokens: 5, outputTokens: 10, cacheWriteTokens: 0, cacheReadTokens: 0,
+        messageId: "msg-abc", modelUid: "claude-3.5",
+      })),
+    ]);
+    const usage = decodeGetChatMessageResponse(bytes).usage!;
+    expect(usage.messageId).toBe("msg-abc");
+    expect(usage.modelUid).toBe("claude-3.5");
+  });
+
+  test("messageId/modelUid absent → undefined", () => {
+    const bytes = Uint8Array.from([
+      ...encodeMessage(7, encodeModelUsageStatsBytes({
+        inputTokens: 1, outputTokens: 2, cacheWriteTokens: 3, cacheReadTokens: 4,
+      })),
+    ]);
+    const usage = decodeGetChatMessageResponse(bytes).usage!;
+    expect(usage.messageId).toBeUndefined();
+    expect(usage.modelUid).toBeUndefined();
   });
 });

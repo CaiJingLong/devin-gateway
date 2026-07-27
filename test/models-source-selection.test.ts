@@ -36,9 +36,17 @@ function encodeMessage(field: number, payload: number[]): number[] {
 }
 
 function modelDiscoveryResponse(): Uint8Array {
+  const modelFeatures = [
+    ...encodeUint32(15, 1), // supportsThinking = true
+  ];
+  const modelInfo = [
+    ...encodeMessage(6, modelFeatures), // modelFeatures
+  ];
   const model = [
     ...encodeString(1, "Remote Fixture Model"),
+    ...encodeUint32(5, 1), // supportsImages = true
     ...encodeUint32(18, 128_000),
+    ...encodeMessage(23, modelInfo), // modelInfo
     ...encodeString(22, REMOTE_MODEL_ID),
   ];
   return Uint8Array.from(encodeMessage(1, model));
@@ -65,6 +73,7 @@ interface ModelsResponse {
     context_window?: number;
     max_tokens?: number;
     reasoning?: boolean;
+    supports_images?: boolean;
   }>;
 }
 
@@ -112,6 +121,7 @@ test("selects remote models by default and the built-in catalog when source=loca
       context_window: 128_000,
       max_tokens: 64_000,
       reasoning: true,
+      supports_images: true,
     }]);
   } finally {
     try {

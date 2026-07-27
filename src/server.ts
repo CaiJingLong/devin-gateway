@@ -29,7 +29,7 @@ import {
   type AnthropicMessage,
   type AnthropicTool,
 } from "./convert.js";
-import { StopReason } from "./proto.js";
+import { StopReason, type ChatToolChoice } from "./proto.js";
 
 // ─── Config (populated by startServer) ──────────────────────────────────────
 
@@ -68,6 +68,29 @@ function errorResponse(req: Request, status: number, message: string, type = "in
   return jsonResponse(req, { error: { message, type } }, status);
 }
 
+// ─── tool_choice mapping ────────────────────────────────────────────────────
+
+/** Map an OpenAI `tool_choice` value onto a Devin `ChatToolChoice`. */
+function mapOpenAIToolChoice(choice: OpenAIChatRequest["tool_choice"]): ChatToolChoice | undefined {
+  if (!choice) return undefined;
+  if (typeof choice === "string") {
+    // "auto" | "none" | "required" → optionName; Devin recognises "auto".
+    return { optionName: choice === "required" ? "any" : choice };
+  }
+  if (choice.type === "function" && choice.function?.name) {
+    return { toolName: choice.function.name };
+  }
+  return undefined;
+}
+
+/** Map an Anthropic `tool_choice` value onto a Devin `ChatToolChoice`. */
+function mapAnthropicToolChoice(choice: AnthropicRequest["tool_choice"]): ChatToolChoice | undefined {
+  if (!choice) return undefined;
+  if (choice.type === "auto" || choice.type === "any") return { optionName: choice.type };
+  if (choice.type === "tool" && choice.name) return { toolName: choice.name };
+  return undefined;
+}
+
 // ─── OpenAI Chat Completions ─────────────────────────────────────────────────
 
 interface OpenAIChatRequest {
@@ -95,6 +118,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
   const prompts = toDevinPrompts(internal, cascadeId);
   const systemPrompt = extractSystemPrompt(body.messages);
   const tools = openaiToolsToDevin(body.tools);
+  const toolChoice = mapOpenAIToolChoice(body.tool_choice);
   const stop = Array.isArray(body.stop) ? body.stop : body.stop ? [body.stop] : undefined;
   const maxTokens = body.max_completion_tokens ?? body.max_tokens;
 
@@ -105,7 +129,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
     return streamOpenAIChat(req, {
       token, modelUid, systemPrompt, prompts, tools, maxTokens,
       temperature: body.temperature, topP: body.top_p, stopSequences: stop,
-      cascadeId, modelId: body.model, completionId, created,
+      cascadeId, modelId: body.model, completionId, created, toolChoice,
     });
   }
 
@@ -119,7 +143,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 
     for await (const ev of streamChat({
       apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
-      maxTokens, temperature: body.temperature, topP: body.top_p, stopSequences: stop, cascadeId,
+      maxTokens, temperature: body.temperature, topP: body.top_p, stopSequences: stop, cascadeId, toolChoice,
       baseUrl: DEVIN_BASE_URL || undefined,
     })) {
       if (ev.type === "text") text += ev.deltaText;
@@ -181,9 +205,10 @@ function streamOpenAIChat(
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
     maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     cascadeId: string; modelId: string; completionId: string; created: number;
+    toolChoice?: ChatToolChoice;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created } = params;
+  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created, toolChoice } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -207,7 +232,7 @@ function streamOpenAIChat(
 
         for await (const ev of streamChat({
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
-          maxTokens, temperature, topP, stopSequences, cascadeId,
+          maxTokens, temperature, topP, stopSequences, cascadeId, toolChoice,
           baseUrl: DEVIN_BASE_URL || undefined,
         })) {
           upstreamChunks++;
@@ -545,13 +570,14 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
       ? body.system.map((s) => s.text).join("\n\n")
       : "";
   const tools = anthropicToolsToDevin(body.tools);
+  const toolChoice = mapAnthropicToolChoice(body.tool_choice);
   const messageId = `msg_${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`;
 
   if (body.stream) {
     return streamAnthropic(req, {
       token, modelUid, systemPrompt, prompts, tools,
       maxTokens: body.max_tokens, temperature: body.temperature, topP: body.top_p,
-      stopSequences: body.stop_sequences, cascadeId, modelId: body.model, messageId,
+      stopSequences: body.stop_sequences, cascadeId, modelId: body.model, messageId, toolChoice,
     });
   }
 
@@ -565,7 +591,7 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
     for await (const ev of streamChat({
       apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
       maxTokens: body.max_tokens, temperature: body.temperature, topP: body.top_p,
-      stopSequences: body.stop_sequences, cascadeId, baseUrl: DEVIN_BASE_URL || undefined,
+      stopSequences: body.stop_sequences, cascadeId, toolChoice, baseUrl: DEVIN_BASE_URL || undefined,
     })) {
       if (ev.type === "text") text += ev.deltaText;
       else if (ev.type === "thinking") thinking += ev.deltaThinking;
@@ -621,9 +647,10 @@ function streamAnthropic(
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof anthropicToolsToDevin>;
     maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     cascadeId: string; modelId: string; messageId: string;
+    toolChoice?: ChatToolChoice;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, messageId } = params;
+  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, messageId, toolChoice } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -666,7 +693,7 @@ function streamAnthropic(
 
         for await (const ev of streamChat({
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
-          maxTokens, temperature, topP, stopSequences, cascadeId, baseUrl: DEVIN_BASE_URL || undefined,
+          maxTokens, temperature, topP, stopSequences, cascadeId, toolChoice, baseUrl: DEVIN_BASE_URL || undefined,
         })) {
           if (ev.type === "thinking" && ev.deltaThinking) {
             if (currentBlockType !== "thinking") {
@@ -770,6 +797,7 @@ async function handleModels(req: Request): Promise<Response> {
         context_window: m.contextWindow,
         max_tokens: m.maxTokens,
         reasoning: m.reasoning,
+        supports_images: m.supportsImages,
       })),
     });
   } catch (err) {
