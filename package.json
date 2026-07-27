@@ -92,8 +92,10 @@
   },
   "dependencies": {},
   "devDependencies": {
+    "@anthropic-ai/sdk": "^0.115.0",
     "@types/bun": "latest",
     "@types/node": "latest",
+    "openai": "^6.49.0",
     "typescript": "^5"
   }
 }
