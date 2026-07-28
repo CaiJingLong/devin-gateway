@@ -1,15 +1,20 @@
 services:
   devin-gateway:
     build: .
+    env_file:
+      - path: .env
+        required: false
     ports:
-      - "127.0.0.1:${PORT:-3000}:3000"
+      - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
     environment:
-      - PORT=3000
-      - HOST=0.0.0.0
+      - PORT=${PORT:-3000}
+      - HOST=${HOST:-0.0.0.0}
       # Optional: fallback token for requests that omit Authorization/x-api-key
       - DEVIN_API_KEY=${DEVIN_API_KEY:-}
       # Optional: override Devin API base URL
       - DEVIN_BASE_URL=${DEVIN_BASE_URL:-}
+      # Log level: debug | info | warn | error (default: info)
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]

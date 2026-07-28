@@ -30,6 +30,7 @@ import {
   type AnthropicTool,
 } from "./convert.js";
 import { StopReason, type ChatToolChoice } from "./proto.js";
+import { log, truncate } from "./log.js";
 
 // ─── Config (populated by startServer) ──────────────────────────────────────
 
@@ -217,7 +218,7 @@ function streamOpenAIChat(
 
       let upstreamChunks = 0;
       let sentChunks = 0;
-      const log = (msg: string) => console.error(`[stream/chat ${completionId}] ${msg}`);
+      const slog = (msg: string) => log.debug(`[stream/chat ${completionId}] ${msg}`);
 
       try {
         // Initial role chunk
@@ -274,7 +275,7 @@ function streamOpenAIChat(
           } else if (ev.type === "error") {
             send({ error: { message: ev.error, type: "api_error" } });
             sentChunks++;
-            log(`upstream error: ${ev.error}`);
+            slog(`upstream error: ${ev.error}`);
           }
         }
 
@@ -284,11 +285,11 @@ function streamOpenAIChat(
         });
         sentChunks++;
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-        log(`done — upstream chunks: ${upstreamChunks}, client chunks: ${sentChunks}`);
+        slog(`done — upstream chunks: ${upstreamChunks}, client chunks: ${sentChunks}`);
       } catch (err) {
         send({ error: { message: String((err as Error).message ?? err), type: "api_error" } });
         sentChunks++;
-        log(`exception after upstream=${upstreamChunks} client=${sentChunks}: ${(err as Error).message ?? err}`);
+        slog(`exception after upstream=${upstreamChunks} client=${sentChunks}: ${(err as Error).message ?? err}`);
       } finally {
         controller.close();
       }
@@ -843,37 +844,53 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
     // Bun closes idle streaming connections after 10s by default. Thinking
     // models can reason for tens of seconds before emitting text, so raise the
     // ceiling (255 is Bun's max) to keep SSE streams alive through quiet gaps.
-    idleTimeout: 255,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const method = req.method;
       const path = url.pathname;
+      const startedAt = Date.now();
+      const id = crypto.randomUUID().slice(0, 8);
 
       // CORS preflight
       if (method === "OPTIONS") {
         return new Response(null, { status: 204, headers: corsHeaders(req) });
       }
 
+      log.info(`→ ${method} ${path} [${id}]`);
+      if (log.enabled("debug") && method === "POST") {
+        try {
+          const bodyText = await req.clone().text();
+          log.debug(`body [${id}]: ${truncate(bodyText)}`);
+        } catch { /* body not cloneable/empty */ }
+      }
+
+      let res: Response;
       try {
         // Health
         if (path === "/health" && method === "GET") {
-          return jsonResponse(req, { status: "ok", fallback_token: DEFAULT_DEVIN_KEY ? "configured" : "not_set" });
+          res = jsonResponse(req, { status: "ok", fallback_token: DEFAULT_DEVIN_KEY ? "configured" : "not_set" });
+        } else if (path === "/v1/models" && method === "GET") {
+          res = await handleModels(req);
+        } else if (path === "/v1/chat/completions" && method === "POST") {
+          res = await handleChatCompletions(req);
+        } else if (path === "/v1/responses" && method === "POST") {
+          res = await handleResponses(req);
+        } else if (path === "/v1/messages" && method === "POST") {
+          res = await handleAnthropicMessages(req);
+        } else {
+          res = errorResponse(req, 404, `Not found: ${method} ${path}`);
         }
-
-        if (path === "/v1/models" && method === "GET") return await handleModels(req);
-
-        // OpenAI
-        if (path === "/v1/chat/completions" && method === "POST") return await handleChatCompletions(req);
-        if (path === "/v1/responses" && method === "POST") return await handleResponses(req);
-
-        // Anthropic
-        if (path === "/v1/messages" && method === "POST") return await handleAnthropicMessages(req);
-
-        // 404
-        return errorResponse(req, 404, `Not found: ${method} ${path}`);
       } catch (err) {
-        return errorResponse(req, 500, String((err as Error).message ?? err));
+        log.error(`handler error [${id}] ${method} ${path}:`, err);
+        res = errorResponse(req, 500, String((err as Error).message ?? err));
       }
+
+      const ms = Date.now() - startedAt;
+      const status = res.status;
+      if (status >= 500) log.error(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
+      else if (status >= 400) log.warn(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
+      else log.info(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
+      return res;
     },
   });
 
@@ -886,13 +903,12 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
 
   const handleShutdown = (): void => {
     void stop().catch((error) => {
-      console.error("[shutdown] Failed to stop cleanly:", error);
+      log.error("[shutdown] Failed to stop cleanly:", error);
       process.exit(1);
     });
   };
   process.once("SIGTERM", handleShutdown);
   process.once("SIGINT", handleShutdown);
-
   console.log(`Devin Gateway running at http://${HOST}:${PORT}`);
   console.log(`  OpenAI:    POST /v1/chat/completions, POST /v1/responses, GET /v1/models`);
   console.log(`  Anthropic: POST /v1/messages`);
