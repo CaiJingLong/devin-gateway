@@ -46,7 +46,7 @@ bun run start
 
 ### 使用 Docker
 
-发布镜像支持 `linux/amd64` 和 `linux/arm64`。启动前，先在宿主机运行 `bun run login`。
+发布镜像支持 `linux/amd64` 和 `linux/arm64`，可从 [GHCR](https://github.com/CaiJingLong/devin-gateway/pkgs/container/devin-gateway)（`ghcr.io/caijinglong/devin-gateway`）或 [Docker Hub](https://hub.docker.com/r/kikt69/devin-gateway)（`kikt69/devin-gateway`）拉取。启动前，先在宿主机运行 `bun run login`。
 
 #### `docker run`
 
@@ -55,7 +55,7 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/caijinglong/devin-gateway:0.4.1
+  ghcr.io/caijinglong/devin-gateway:0.4.2
 
 客户端在每次请求中携带自己的 Devin token，因此无需挂载 token 卷。仅当你需要服务端兜底时，才设置 `DEVIN_API_KEY`。
 
@@ -66,7 +66,7 @@ docker run -d \
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.4.1
+    image: ghcr.io/caijinglong/devin-gateway:0.4.2
     container_name: devin-gateway
     restart: unless-stopped
     ports:

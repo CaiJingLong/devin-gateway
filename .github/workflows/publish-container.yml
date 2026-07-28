@@ -45,6 +45,14 @@ jobs:
           username: kikt69
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Sync README to Docker Hub
+        uses: peter-evans/dockerhub-description@v4
+        with:
+          username: kikt69
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: kikt69/devin-gateway
+          readme-filepath: ./README.md
+
       - name: Generate image metadata
         id: metadata
         uses: docker/metadata-action@v6

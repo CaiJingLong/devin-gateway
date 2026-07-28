@@ -46,7 +46,7 @@ The gateway listens on `http://localhost:3000` by default. It holds no token sta
 
 ### Docker
 
-The published image supports `linux/amd64` and `linux/arm64`. Sign in on the host with `bun run login` before starting it.
+The published image supports `linux/amd64` and `linux/arm64`, and is available from both [GHCR](https://github.com/CaiJingLong/devin-gateway/pkgs/container/devin-gateway) (`ghcr.io/caijinglong/devin-gateway`) and [Docker Hub](https://hub.docker.com/r/kikt69/devin-gateway) (`kikt69/devin-gateway`). Sign in on the host with `bun run login` before starting it.
 
 #### `docker run`
 
@@ -55,7 +55,7 @@ docker run -d \
   --name devin-gateway \
   --restart unless-stopped \
   -p 127.0.0.1:3000:3000 \
-  ghcr.io/caijinglong/devin-gateway:0.4.1
+  ghcr.io/caijinglong/devin-gateway:0.4.2
 ```
 
 Clients send their own Devin token per request, so no token volume is needed. Set `DEVIN_API_KEY` only if you want a server-side fallback.
@@ -67,7 +67,7 @@ Create `compose.yaml`:
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.4.1
+    image: ghcr.io/caijinglong/devin-gateway:0.4.2
     container_name: devin-gateway
     restart: unless-stopped
     ports:
