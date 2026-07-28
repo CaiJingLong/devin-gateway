@@ -143,6 +143,9 @@ curl 'http://localhost:3000/v1/models?source=local'
 
 > **注意**：`/v1/models` 默认加载 Devin 实时模型目录；`?source=remote` 是等价的显式写法。下表是内置目录在所标时间的快照。Devin 可用模型随时可能变动，因此本列表**仅供参考，不作为 workflow 的约束**——`model` 接受任意原始 Cascade UID，未知 UID 会直通给 Devin API。实时列表请查询 `GET /v1/models`。
 
+<details>
+<summary>模型目录快照（2026-07-23）</summary>
+
 **快照时间：2026-07-23**
 
 | 模型 id | 名称 | 上下文窗口 | 最大输出 |
@@ -273,6 +276,8 @@ curl 'http://localhost:3000/v1/models?source=local'
 | `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 64,000 |
 | `swe-1-7` | SWE-1.7 Max | 262,000 | 64,000 |
 | `swe-1-7-lightning` | SWE-1.7 Lightning | 202,752 | 64,000 |
+
+</details>
 
 ## 配置
 

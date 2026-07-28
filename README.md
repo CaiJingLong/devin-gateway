@@ -144,6 +144,9 @@ curl 'http://localhost:3000/v1/models?source=local'
 
 > **Note**: `/v1/models` loads the live Devin catalog by default; `?source=remote` is an explicit equivalent. The table below is a snapshot of the built-in catalog at the time shown. Devin's available models change at any time, so this list is **for reference only and is not a constraint on the workflow** — `model` accepts any raw Cascade UID and passes unknown UIDs straight through. Use `GET /v1/models` for the live list.
 
+<details>
+<summary>Model catalog snapshot (2026-07-23)</summary>
+
 **Snapshot time: 2026-07-23**
 
 | Model id | Name | Context window | Max tokens |
@@ -274,6 +277,8 @@ curl 'http://localhost:3000/v1/models?source=local'
 | `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 64,000 |
 | `swe-1-7` | SWE-1.7 Max | 262,000 | 64,000 |
 | `swe-1-7-lightning` | SWE-1.7 Lightning | 202,752 | 64,000 |
+
+</details>
 
 ## Configuration
 
