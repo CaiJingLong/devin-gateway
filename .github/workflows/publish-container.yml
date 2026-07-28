@@ -3,6 +3,11 @@ name: Publish container image
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.4.2)'
+        required: true
 
 permissions:
   contents: read
@@ -10,6 +15,7 @@ permissions:
 
 env:
   IMAGE_NAME: ghcr.io/caijinglong/devin-gateway
+  DOCKERHUB_IMAGE: kikt69/devin-gateway
 
 jobs:
   publish:
@@ -33,14 +39,22 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: kikt69
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Generate image metadata
         id: metadata
         uses: docker/metadata-action@v6
         with:
-          images: ${{ env.IMAGE_NAME }}
+          images: |
+            ${{ env.IMAGE_NAME }}
+            ${{ env.DOCKERHUB_IMAGE }}
           tags: |
-            type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }}
+            type=semver,pattern={{version}},value=${{ github.event.release.tag_name || inputs.tag }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name || inputs.tag }}
             type=raw,value=latest
           labels: |
             org.opencontainers.image.title=Devin Gateway
