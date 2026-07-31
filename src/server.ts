@@ -844,6 +844,7 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
     // Bun closes idle streaming connections after 10s by default. Thinking
     // models can reason for tens of seconds before emitting text, so raise the
     // ceiling (255 is Bun's max) to keep SSE streams alive through quiet gaps.
+    idleTimeout: 255,
     async fetch(req: Request): Promise<Response> {
       const url = new URL(req.url);
       const method = req.method;
