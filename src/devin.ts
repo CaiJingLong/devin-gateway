@@ -111,6 +111,12 @@ export interface ChatParams {
   cascadeId?: string;
   baseUrl?: string;
   signal?: AbortSignal;
+  /**
+   * Max silence (ms) from the upstream chat stream before aborting. Default
+   * 120000 (2 min). Re-armed on every received chunk, so only true silence
+   * triggers it — long, active streams are unaffected.
+   */
+  upstreamIdleTimeoutMs?: number;
   /** Tool choice override; defaults to `{ optionName: "auto" }`. */
   toolChoice?: ChatToolChoice;
 }
@@ -130,8 +136,16 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   const token = normalizeToken(params.apiKey);
   const baseUrl = (params.baseUrl ?? DEVIN_API_URL).replace(/\/+$/, "");
 
-  // Resolve user JWT first
-  const auth = await getUserJwt(token, baseUrl, params.signal);
+  // Resolve user JWT first. Auth is a quick handshake — cap it at 30s so a
+  // stalled Codeium auth endpoint surfaces as an explicit error, not a hang.
+  const authTimeout = AbortSignal.timeout(30_000);
+  let auth;
+  try {
+    auth = await getUserJwt(token, baseUrl, params.signal ? AbortSignal.any([params.signal, authTimeout]) : authTimeout);
+  } catch (err) {
+    if (authTimeout.aborted) throw new Error("Devin auth timed out after 30s");
+    throw err;
+  }
   const chatBaseUrl = auth.baseUrl ?? baseUrl;
 
   const cascadeId = params.cascadeId ?? crypto.randomUUID();
@@ -171,19 +185,40 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   frame.writeUInt32BE(gz.length, 1);
   frame.set(gz, 5);
 
-  const response = await fetch(`${chatBaseUrl}${CHAT_MESSAGE_PATH}`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/connect+proto",
-      "connect-protocol-version": "1",
-      "connect-content-encoding": "gzip",
-      "accept-encoding": "identity",
-      "user-agent": "connect-go/1.18.1 (go1.26.3)",
-      "connect-accept-encoding": "gzip",
-    },
-    body: frame,
-    signal: params.signal,
-  });
+  // Upstream idle guard: abort if Codeium stops sending data for too long,
+  // turning a silent hang into an explicit error instead of an infinite wait
+  // (or a downstream EOF). Re-armed on every chunk so long, active streams
+  // are not cut off — only true silence triggers it.
+  const UPSTREAM_IDLE_MS = params.upstreamIdleTimeoutMs ?? 120_000;
+  const chatController = new AbortController();
+  const chatSignal = params.signal ? AbortSignal.any([params.signal, chatController.signal]) : chatController.signal;
+  let idleTimer: Timer | undefined;
+  const armIdleTimer = (): void => {
+    clearTimeout(idleTimer);
+    idleTimer = setTimeout(() => chatController.abort(new Error("upstream idle timeout")), UPSTREAM_IDLE_MS);
+  };
+
+  let response: Response;
+  try {
+    armIdleTimer();
+    response = await fetch(`${chatBaseUrl}${CHAT_MESSAGE_PATH}`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/connect+proto",
+        "connect-protocol-version": "1",
+        "connect-content-encoding": "gzip",
+        "accept-encoding": "identity",
+        "user-agent": "connect-go/1.18.1 (go1.26.3)",
+        "connect-accept-encoding": "gzip",
+      },
+      body: frame,
+      signal: chatSignal,
+    });
+  } catch (err) {
+    clearTimeout(idleTimer);
+    if (chatController.signal.aborted) throw new Error(`Devin stream timed out: no response within ${UPSTREAM_IDLE_MS / 1000}s`);
+    throw err;
+  }
 
   if (!response.ok) {
     const text = await response.text();
@@ -197,7 +232,15 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   let lastUsage: GetChatMessageResponse["usage"] = null;
 
   for (;;) {
-    const { done, value } = await reader.read();
+    let done: boolean, value: Uint8Array | undefined;
+    try {
+      ({ done, value } = await reader.read());
+    } catch (err) {
+      clearTimeout(idleTimer);
+      if (chatController.signal.aborted) throw new Error(`Devin stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+      throw err;
+    }
+    if (!done) armIdleTimer();
     if (value && value.length > 0) {
       pending = Buffer.concat([pending, value]);
     }
@@ -206,6 +249,7 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
       const flag = pending[0];
       const len = pending.readUInt32BE(1);
       if (len > MAX_FRAME_PAYLOAD) {
+        clearTimeout(idleTimer);
         throw new Error(`Connect frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
       }
       if (pending.length < 5 + len) break;
@@ -224,6 +268,7 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
                 type: "error",
                 error: `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`,
               };
+              clearTimeout(idleTimer);
               return;
             }
           } catch {
@@ -261,6 +306,7 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
     if (done) break;
   }
 
+  clearTimeout(idleTimer);
   yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
 }
 

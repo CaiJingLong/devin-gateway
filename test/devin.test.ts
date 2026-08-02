@@ -517,6 +517,74 @@ describe("streamChat", () => {
       await server.stop();
     }
   });
+
+  test("upstream idle silence aborts the stream with a timed-out error", async () => {
+    // Chat path sends one valid frame, then stays open without ending. The
+    // idle guard must fire on the silence after the first chunk and surface an
+    // explicit error instead of hanging forever. Real timer is intentional —
+    // integration test of the actual abort timing; fake timers cannot drive
+    // the network IO abort sequence.
+    const authResponse = Uint8Array.from(encodeGetUserJwtResponseBytes({ userJwt: "stream-jwt" }));
+    const frame = connectFrame(FLAG_NORMAL, encodeGetChatMessageResponseBytes({ deltaText: "partial" }));
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        const path = new URL(req.url).pathname;
+        if (path === AUTH_PATH) {
+          return new Response(authResponse, { headers: { "content-type": "application/proto" } });
+        }
+        if (path === CHAT_PATH) {
+          return new Response(
+            new ReadableStream({
+              start(controller) {
+                controller.enqueue(frame);
+                // intentionally no close() — read() hangs after the first chunk
+              },
+            }),
+            { headers: { "content-type": "application/connect+proto" } },
+          );
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await expect(
+        collectStream({ ...baseChatParams(server.url.origin), upstreamIdleTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out.*no upstream data/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("upstream slow to respond aborts with a timed-out error", async () => {
+    // Chat path never resolves the response; the idle guard fires while
+    // waiting for the fetch itself. Real timer is intentional — this is an
+    // integration test of the actual abort timing; fake timers cannot drive
+    // the network IO abort sequence.
+    const authResponse = Uint8Array.from(encodeGetUserJwtResponseBytes({ userJwt: "stream-jwt" }));
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: (req) => {
+        const path = new URL(req.url).pathname;
+        if (path === AUTH_PATH) {
+          return new Response(authResponse, { headers: { "content-type": "application/proto" } });
+        }
+        if (path === CHAT_PATH) {
+          return new Promise<Response>(() => {});
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await expect(
+        collectStream({ ...baseChatParams(server.url.origin), upstreamIdleTimeoutMs: 100 }),
+      ).rejects.toThrow(/timed out.*no response within/);
+    } finally {
+      await server.stop();
+    }
+  });
 });
 
 // ─── discoverModels (supplements devin-model-discovery.test.ts) ──────────────
