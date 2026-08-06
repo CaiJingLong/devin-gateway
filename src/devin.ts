@@ -151,7 +151,12 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   const cascadeId = params.cascadeId ?? crypto.randomUUID();
   const stopPatterns = [...DEFAULT_STOP_PATTERNS, ...(params.stopSequences ?? [])];
   const maxTokens = params.maxTokens ?? 64000;
-  const temperature = params.temperature ?? 0.4;
+  // Codeium's upstream rejects temperature=0 with invalid_argument for some
+  // models (e.g. glm-5-2). proto3 omits the field when it equals the default
+  // (0.0), so the server sees an unset temperature and errors. Clamp 0 to a
+  // negligible positive value that is indistinguishable from deterministic
+  // output but keeps the upstream happy.
+  const temperature = params.temperature === 0 ? 0.01 : (params.temperature ?? 0.4);
 
   const configuration: CompletionConfiguration = {
     numCompletions: 1n,
@@ -268,7 +273,13 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
                 type: "error",
                 error: `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`,
               };
+              // Yield a terminal `done` so downstream consumers receive the
+              // accumulated stopReason and a consistent termination signal.
+              // Usage was already yielded inline as data frames arrived (the
+              // end-stream trailer is always the last frame), so it is not
+              // re-yielded here.
               clearTimeout(idleTimer);
+              yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
               return;
             }
           } catch {

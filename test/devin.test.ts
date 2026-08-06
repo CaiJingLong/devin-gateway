@@ -1,5 +1,5 @@
 import { expect, test, describe } from "bun:test";
-import { gzipSync } from "node:zlib";
+import { gzipSync, gunzipSync } from "node:zlib";
 
 import {
   getUserJwt,
@@ -467,10 +467,39 @@ describe("streamChat", () => {
     const server = mockUpstream([textFrame, endFrame]);
     try {
       const events = await collectStream(baseChatParams(server.url.origin));
-      // After the error event the generator returns; no done event.
-      expect(events.map((e) => e.type)).toEqual(["text", "error"]);
+      // Error is followed by a terminal `done` so downstream gets a
+      // consistent termination signal (stopReason + accumulated usage).
+      expect(events.map((e) => e.type)).toEqual(["text", "error", "done"]);
       expect(events[1].error).toContain("internal");
       expect(events[1].error).toContain("boom");
+      expect(events[2].type).toBe("done");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("usage data frame is yielded before a subsequent error trailer", async () => {
+    // The end-stream trailer is always the last frame; any usage sent in a
+    // data frame must be forwarded before the error event, not lost.
+    const usageFrame = connectFrame(
+      FLAG_NORMAL,
+      encodeGetChatMessageResponseBytes({
+        deltaText: "hi",
+        usage: { inputTokens: 140, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0 },
+      }),
+    );
+    const trailer = Buffer.from(
+      JSON.stringify({ error: { code: "invalid_argument", message: "an internal error occurred" } }),
+    );
+    const endFrame = connectFrame(FLAG_END_STREAM, trailer);
+    const server = mockUpstream([usageFrame, endFrame]);
+    try {
+      const events = await collectStream(baseChatParams(server.url.origin));
+      expect(events.map((e) => e.type)).toEqual(["text", "usage", "error", "done"]);
+      expect(events[1].usage).toEqual({
+        inputTokens: 140, outputTokens: 5, cacheWriteTokens: 0, cacheReadTokens: 0,
+      });
+      expect(events[2].error).toContain("invalid_argument");
     } finally {
       await server.stop();
     }
@@ -581,6 +610,64 @@ describe("streamChat", () => {
       await expect(
         collectStream({ ...baseChatParams(server.url.origin), upstreamIdleTimeoutMs: 100 }),
       ).rejects.toThrow(/timed out.*no response within/);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  test("temperature=0 is clamped to 0.01 in the encoded request", async () => {
+    // Upstream rejects temperature=0 with invalid_argument. Verify the
+    // gateway clamps it before sending.
+    let capturedBody: Uint8Array | null = null;
+    const authResponse = Uint8Array.from(
+      encodeGetUserJwtResponseBytes({ userJwt: "temp-jwt" }),
+    );
+    const server = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      fetch: async (req) => {
+        const path = new URL(req.url).pathname;
+        if (path === AUTH_PATH) {
+          return new Response(authResponse, { headers: { "content-type": "application/proto" } });
+        }
+        if (path === CHAT_PATH) {
+          capturedBody = new Uint8Array(await req.arrayBuffer());
+          const frame = connectFrame(
+            FLAG_NORMAL,
+            encodeGetChatMessageResponseBytes({ deltaText: "ok" }),
+          );
+          return new Response(frame, { headers: { "content-type": "application/connect+proto" } });
+        }
+        return new Response("not found", { status: 404 });
+      },
+    });
+    try {
+      await collectStream({ ...baseChatParams(server.url.origin), temperature: 0 });
+      expect(capturedBody).not.toBeNull();
+      // Connect frame: 5-byte header + gzip payload
+      const body = Buffer.from(capturedBody!);
+      const flag = body[0];
+      const len = body.readUInt32BE(1);
+      const payload = body.subarray(5, 5 + len);
+      const raw = flag & 0x01 ? gunzipSync(payload) : payload;
+      // Decode GetChatMessageRequest → field 8 = CompletionConfiguration
+      const dec = new ProtoDecoder(raw);
+      let temp: number | undefined;
+      while (!dec.done) {
+        const { field, wire } = dec.readTag();
+        if (field === 8 && wire === 2) {
+          dec.readMessage((sub) => {
+            while (!sub.done) {
+              const t = sub.readTag();
+              if (t.field === 5) temp = sub.readDouble();
+              else sub.skip(t.wire);
+            }
+          });
+        } else {
+          dec.skip(wire);
+        }
+      }
+      expect(temp).toBe(0.01);
     } finally {
       await server.stop();
     }
