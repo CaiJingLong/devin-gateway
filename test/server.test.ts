@@ -60,7 +60,7 @@ interface ChatResponseFields {
   thinking?: string;
   toolCalls?: ToolCallFields[];
   stopReason?: number;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number };
 }
 
 /** Build a GetChatMessageResponse protobuf payload. */
@@ -83,6 +83,8 @@ function chatResponsePayload(fields: ChatResponseFields): Uint8Array {
       ...encodeMessage(7, [
         ...encodeUint32(2, fields.usage.inputTokens),
         ...encodeUint32(3, fields.usage.outputTokens),
+        ...(fields.usage.cacheWriteTokens ? encodeUint32(4, fields.usage.cacheWriteTokens) : []),
+        ...(fields.usage.cacheReadTokens ? encodeUint32(5, fields.usage.cacheReadTokens) : []),
       ]),
     );
   }
@@ -479,6 +481,30 @@ describe("POST /v1/chat/completions (non-streaming)", () => {
     }
   });
 
+  test("cache tokens propagate to prompt_tokens_details.cached_tokens", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([
+          dataFrame({ text: "hi", usage: { inputTokens: 10, outputTokens: 5, cacheWriteTokens: 2, cacheReadTokens: 4 } }),
+        ]),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "hi" }] }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.usage.prompt_tokens).toBe(10);
+      expect(body.usage.prompt_tokens_details.cached_tokens).toBe(4);
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
   test("maps tool calls to tool_calls with content null and tool_calls finish_reason", async () => {
     const upstream = startUpstream({
       chatBody: () =>
@@ -704,7 +730,7 @@ describe("POST /v1/messages (Anthropic, non-streaming)", () => {
       expect(body.type).toBe("message");
       expect(body.content).toEqual([{ type: "text", text: "hi" }]);
       expect(body.stop_reason).toBe("end_turn");
-      expect(body.usage).toEqual({ input_tokens: 10, output_tokens: 5 });
+      expect(body.usage).toEqual({ input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
     } finally {
       await cleanup();
       await upstream.stop();
@@ -790,7 +816,7 @@ describe("POST /v1/messages (Anthropic, non-streaming)", () => {
       });
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.usage).toEqual({ input_tokens: 0, output_tokens: 0 });
+      expect(body.usage).toEqual({ input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
     } finally {
       await cleanup();
       await upstream.stop();

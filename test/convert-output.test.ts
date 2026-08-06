@@ -497,7 +497,7 @@ describe("OpenAI /v1/responses (non-streaming) — output format", () => {
         body: JSON.stringify({ model: "m", input: "hi" }),
       });
       const body = await res.json();
-      expect(body.usage).toEqual({ input_tokens: 7, output_tokens: 3, total_tokens: 10 });
+      expect(body.usage).toEqual({ input_tokens: 7, output_tokens: 3, total_tokens: 10, input_tokens_details: { cached_tokens: 0 } });
     } finally {
       await cleanup();
       await upstream.stop();
@@ -703,7 +703,7 @@ describe("Anthropic /v1/messages (non-streaming) — output format", () => {
     }
   });
 
-  test("zero cache tokens -> cache_*_input_tokens fields omitted (undefined)", async () => {
+  test("zero cache tokens -> cache_*_input_tokens fields are 0 (not omitted)", async () => {
     const upstream = startUpstream({
       chatBody: () =>
         framesBody([dataFrame({ text: "hi", usage: { inputTokens: 10, outputTokens: 5 } })]),
@@ -716,8 +716,8 @@ describe("Anthropic /v1/messages (non-streaming) — output format", () => {
         body: JSON.stringify({ model: "m", max_tokens: 100, messages: [{ role: "user", content: "hi" }] }),
       });
       const body = await res.json();
-      expect(body.usage.cache_read_input_tokens).toBeUndefined();
-      expect(body.usage.cache_creation_input_tokens).toBeUndefined();
+      expect(body.usage.cache_read_input_tokens).toBe(0);
+      expect(body.usage.cache_creation_input_tokens).toBe(0);
     } finally {
       await cleanup();
       await upstream.stop();
@@ -873,7 +873,7 @@ describe("Anthropic /v1/messages stream=true — output format", () => {
       });
       const events = parseSse(await res.text());
       const messageDelta = events.find((e) => e.event === "message_delta");
-      expect(JSON.parse(messageDelta!.data).usage).toEqual({ output_tokens: 8 });
+      expect(JSON.parse(messageDelta!.data).usage).toEqual({ output_tokens: 8, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 });
     } finally {
       await cleanup();
       await upstream.stop();
@@ -1122,7 +1122,7 @@ describe("streaming start-event payload structure", () => {
         content: [],
         stop_reason: null,
         stop_sequence: null,
-        usage: { input_tokens: 0, output_tokens: 0 },
+        usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
       });
     } finally {
       await cleanup();

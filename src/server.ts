@@ -106,6 +106,7 @@ interface OpenAIChatRequest {
   tool_choice?: string | { type: string; function?: { name: string } };
   stop?: string | string[];
   reasoning_effort?: string;
+  stream_options?: { include_usage?: boolean };
 }
 
 async function handleChatCompletions(req: Request): Promise<Response> {
@@ -131,6 +132,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       token, modelUid, systemPrompt, prompts, tools, maxTokens,
       temperature: body.temperature, topP: body.top_p, stopSequences: stop,
       cascadeId, modelId: body.model, completionId, created, toolChoice,
+      includeUsage: body.stream_options?.include_usage ?? false,
     });
   }
 
@@ -192,6 +194,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
         prompt_tokens: usage.inputTokens,
         completion_tokens: usage.outputTokens,
         total_tokens: usage.inputTokens + usage.outputTokens,
+        prompt_tokens_details: { cached_tokens: usage.cacheReadTokens },
       } : undefined,
     });
   } catch (err) {
@@ -204,12 +207,12 @@ function streamOpenAIChat(
   params: {
     token: string; modelUid: string; systemPrompt: string;
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
-    maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     cascadeId: string; modelId: string; completionId: string; created: number;
     toolChoice?: ChatToolChoice;
+    includeUsage: boolean;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created, toolChoice } = params;
+  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created, toolChoice, includeUsage } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -230,6 +233,7 @@ function streamOpenAIChat(
 
         let hasToolCalls = false;
         let stopReason = 0;
+        let usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | null | undefined;
 
         for await (const ev of streamChat({
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
@@ -270,6 +274,8 @@ function streamOpenAIChat(
               });
               sentChunks++;
             }
+          } else if (ev.type === "usage") {
+            usage = ev.usage;
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
@@ -278,12 +284,24 @@ function streamOpenAIChat(
             slog(`upstream error: ${ev.error}`);
           }
         }
-
         send({
           id: completionId, object: "chat.completion.chunk", created, model: modelId,
           choices: [{ index: 0, delta: {}, finish_reason: stopReasonToOpenAI(stopReason, hasToolCalls) }],
         });
         sentChunks++;
+        if (includeUsage) {
+          send({
+            id: completionId, object: "chat.completion.chunk", created, model: modelId,
+            choices: [],
+            usage: usage ? {
+              prompt_tokens: usage.inputTokens,
+              completion_tokens: usage.outputTokens,
+              total_tokens: usage.inputTokens + usage.outputTokens,
+              prompt_tokens_details: { cached_tokens: usage.cacheReadTokens },
+            } : undefined,
+          });
+          sentChunks++;
+        }
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         slog(`done — upstream chunks: ${upstreamChunks}, client chunks: ${sentChunks}`);
       } catch (err) {
@@ -372,7 +390,7 @@ async function handleResponses(req: Request): Promise<Response> {
   try {
     let text = "";
     let stopReason = 0;
-    let usage: { inputTokens: number; outputTokens: number } | null = null;
+    let usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | null = null;
 
     for await (const ev of streamChat({
       apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
@@ -381,7 +399,7 @@ async function handleResponses(req: Request): Promise<Response> {
     })) {
       if (ev.type === "text") text += ev.deltaText;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
-      else if (ev.type === "usage" && ev.usage) usage = { inputTokens: ev.usage.inputTokens, outputTokens: ev.usage.outputTokens };
+      else if (ev.type === "usage" && ev.usage) usage = ev.usage;
       else if (ev.type === "error") throw new Error(ev.error);
     }
 
@@ -402,6 +420,7 @@ async function handleResponses(req: Request): Promise<Response> {
         input_tokens: usage.inputTokens,
         output_tokens: usage.outputTokens,
         total_tokens: usage.inputTokens + usage.outputTokens,
+        input_tokens_details: { cached_tokens: usage.cacheReadTokens },
       } : undefined,
     });
   } catch (err) {
@@ -439,6 +458,7 @@ function streamOpenAIResponses(
         let fullText = "";
         let outputIndex = 0;
         const outputItems: unknown[] = [];
+        let usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | null | undefined;
 
         const startMessage = () => {
           messageStarted = true;
@@ -494,6 +514,8 @@ function streamOpenAIResponses(
               type: "response.output_text.delta",
               item_id: messageId, output_index: outputIndex, content_index: 0, delta: ev.deltaText,
             });
+          } else if (ev.type === "usage") {
+            usage = ev.usage;
           } else if (ev.type === "error") {
             send("response.failed", { type: "response.failed", error: { message: ev.error } });
           }
@@ -525,7 +547,15 @@ function streamOpenAIResponses(
 
         send("response.completed", {
           type: "response.completed",
-          response: { id: responseId, object: "response", created_at: created, model: modelId, status: "completed", output: outputItems },
+          response: {
+            id: responseId, object: "response", created_at: created, model: modelId, status: "completed", output: outputItems,
+            usage: usage ? {
+              input_tokens: usage.inputTokens,
+              output_tokens: usage.outputTokens,
+              total_tokens: usage.inputTokens + usage.outputTokens,
+              input_tokens_details: { cached_tokens: usage.cacheReadTokens },
+            } : undefined,
+          },
         });
       } catch (err) {
         send("response.failed", { type: "response.failed", error: { message: String((err as Error).message ?? err) } });
@@ -632,9 +662,9 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
       usage: usage ? {
         input_tokens: usage.inputTokens,
         output_tokens: usage.outputTokens,
-        cache_read_input_tokens: usage.cacheReadTokens || undefined,
-        cache_creation_input_tokens: usage.cacheWriteTokens || undefined,
-      } : { input_tokens: 0, output_tokens: 0 },
+        cache_read_input_tokens: usage.cacheReadTokens,
+        cache_creation_input_tokens: usage.cacheWriteTokens,
+      } : { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     });
   } catch (err) {
     return errorResponse(req, 502, String((err as Error).message ?? err));
@@ -665,7 +695,7 @@ function streamAnthropic(
           message: {
             id: messageId, type: "message", role: "assistant", model: modelId,
             content: [], stop_reason: null, stop_sequence: null,
-            usage: { input_tokens: 0, output_tokens: 0 },
+            usage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
           },
         });
 
@@ -673,7 +703,7 @@ function streamAnthropic(
         let currentBlockType: "text" | "thinking" | null = null;
         let hasToolCalls = false;
         let stopReason = 0;
-        let inputTokens = 0, outputTokens = 0;
+        let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
 
         const startBlock = (type: "text" | "thinking") => {
           currentBlockType = type;
@@ -733,6 +763,8 @@ function streamAnthropic(
           } else if (ev.type === "usage" && ev.usage) {
             inputTokens = ev.usage.inputTokens;
             outputTokens = ev.usage.outputTokens;
+            cacheReadTokens = ev.usage.cacheReadTokens;
+            cacheWriteTokens = ev.usage.cacheWriteTokens;
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
@@ -745,7 +777,7 @@ function streamAnthropic(
         send("message_delta", {
           type: "message_delta",
           delta: { stop_reason: stopReasonToAnthropic(stopReason, hasToolCalls), stop_sequence: null },
-          usage: { output_tokens: outputTokens },
+          usage: { output_tokens: outputTokens, cache_read_input_tokens: cacheReadTokens, cache_creation_input_tokens: cacheWriteTokens },
         });
         send("message_stop", { type: "message_stop" });
       } catch (err) {

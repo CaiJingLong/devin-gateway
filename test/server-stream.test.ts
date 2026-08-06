@@ -58,7 +58,7 @@ interface ChatResponseFields {
   thinking?: string;
   toolCalls?: ToolCallFields[];
   stopReason?: number;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: { inputTokens: number; outputTokens: number; cacheWriteTokens?: number; cacheReadTokens?: number };
 }
 
 function chatResponsePayload(fields: ChatResponseFields): Uint8Array {
@@ -80,6 +80,8 @@ function chatResponsePayload(fields: ChatResponseFields): Uint8Array {
       ...encodeMessage(7, [
         ...encodeUint32(2, fields.usage.inputTokens),
         ...encodeUint32(3, fields.usage.outputTokens),
+        ...(fields.usage.cacheWriteTokens ? encodeUint32(4, fields.usage.cacheWriteTokens) : []),
+        ...(fields.usage.cacheReadTokens ? encodeUint32(5, fields.usage.cacheReadTokens) : []),
       ]),
     );
   }
@@ -307,6 +309,75 @@ describe("streamOpenAIChat thinking/reasoning forwarding", () => {
         const delta = o?.choices?.[0]?.delta ?? {};
         expect(!(delta.reasoning_content && delta.content)).toBe(true);
       }
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+});
+
+describe("streamOpenAIChat include_usage", () => {
+  test("emits a final chunk with usage + prompt_tokens_details.cached_tokens", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([
+          dataFrame({ text: "hi", usage: { inputTokens: 10, outputTokens: 5, cacheWriteTokens: 2, cacheReadTokens: 4 } }),
+        ]),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          stream: true,
+          stream_options: { include_usage: true },
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const datas = events.map((e) => e.data);
+      expect(datas[datas.length - 1]).toBe("[DONE]");
+
+      const parsed = datas
+        .filter((d) => d !== "[DONE]")
+        .map((d) => JSON.parse(d));
+
+      // The usage chunk has empty choices and carries usage
+      const usageChunk = parsed.find((o) => o.usage && o.choices.length === 0);
+      expect(usageChunk).toBeDefined();
+      expect(usageChunk!.usage.prompt_tokens).toBe(10);
+      expect(usageChunk!.usage.completion_tokens).toBe(5);
+      expect(usageChunk!.usage.prompt_tokens_details.cached_tokens).toBe(4);
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("omits usage chunk when stream_options.include_usage is not set", async () => {
+    const upstream = startUpstream();
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          stream: true,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const datas = events.map((e) => e.data);
+      const parsed = datas
+        .filter((d) => d !== "[DONE]")
+        .map((d) => JSON.parse(d));
+      const usageChunk = parsed.find((o) => o.usage);
+      expect(usageChunk).toBeUndefined();
     } finally {
       await cleanup();
       await upstream.stop();
