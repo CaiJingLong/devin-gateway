@@ -15,7 +15,7 @@ services:
       - DEVIN_BASE_URL=${DEVIN_BASE_URL:-}
       # Log level: debug | info | warn | error (default: info)
       - LOG_LEVEL=${LOG_LEVEL:-info}
-    restart: unless-stopped
+    restart: always
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
       interval: 30s
