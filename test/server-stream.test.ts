@@ -425,6 +425,159 @@ describe("streamOpenAIChat error event", () => {
   });
 });
 
+describe("upstream rate limit mapping", () => {
+  const RATE_LIMIT_MESSAGE =
+    "Devin stream error permission_denied: Reached overall message rate limit. Please try again later. Your limit will reset in 9 minutes. (trace ID: 2db313e4b2ff90a5fc2c017c7da3d9c1)";
+
+  test("chat completions stream maps a rate-limit trailer to rate_limit_error with code rate_limit_exceeded", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([dataFrame({ text: "hi" })], {
+          error: { code: "permission_denied", message: RATE_LIMIT_MESSAGE },
+        }),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          stream: true,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const errChunk = events
+        .map((e) => {
+          try {
+            return JSON.parse(e.data);
+          } catch {
+            return null;
+          }
+        })
+        .find((o) => o?.error);
+      expect(errChunk).toBeDefined();
+      expect(errChunk.error.type).toBe("rate_limit_error");
+      expect(errChunk.error.code).toBe("rate_limit_exceeded");
+      expect(errChunk.error.message).toContain("rate limit");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("responses stream maps a rate-limit trailer to response.failed with rate_limit_error", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([dataFrame({ text: "hi" })], {
+          error: { code: "permission_denied", message: RATE_LIMIT_MESSAGE },
+        }),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/responses`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "m", stream: true, input: "hi" }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const failed = events.find((e) => e.event === "response.failed");
+      expect(failed).toBeDefined();
+      const err = JSON.parse(failed!.data).error;
+      expect(err.type).toBe("rate_limit_error");
+      expect(err.code).toBe("rate_limit_exceeded");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("anthropic messages stream maps a rate-limit trailer to error event with rate_limit_error", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([dataFrame({ text: "hi" })], {
+          error: { code: "permission_denied", message: RATE_LIMIT_MESSAGE },
+        }),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          max_tokens: 100,
+          stream: true,
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(200);
+      const events = parseSse(await res.text());
+      const errEvent = events.find((e) => e.event === "error");
+      expect(errEvent).toBeDefined();
+      expect(JSON.parse(errEvent!.data).error.type).toBe("rate_limit_error");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+  test("non-streaming chat completions maps a rate-limit trailer to HTTP 429", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([dataFrame({ text: "hi" })], {
+          error: { code: "permission_denied", message: RATE_LIMIT_MESSAGE },
+        }),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(429);
+      const body = await res.json();
+      expect(body.error.type).toBe("rate_limit_error");
+      expect(body.error.message).toContain("rate limit");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+
+  test("trailer with gRPC resource_exhausted code maps to 429 even without rate-limit text", async () => {
+    const upstream = startUpstream({
+      chatBody: () =>
+        framesBody([dataFrame({ text: "hi" })], {
+          error: { code: "resource_exhausted", message: "upstream busy" },
+        }),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "x");
+    try {
+      const res = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          model: "m",
+          messages: [{ role: "user", content: "hi" }],
+        }),
+      });
+      expect(res.status).toBe(429);
+      const body = await res.json();
+      expect(body.error.type).toBe("rate_limit_error");
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+});
+
 describe("streamOpenAIResponses full event sequence", () => {
   test("emits created → output_item.added → content_part.added → text deltas → done → completed", async () => {
     const upstream = startUpstream({

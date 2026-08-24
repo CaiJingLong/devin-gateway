@@ -143,6 +143,8 @@ export interface ChatStreamEvent {
   stopReason?: number;
   usage?: GetChatMessageResponse["usage"];
   error?: string;
+  /** Upstream Connect error code (e.g. "permission_denied") when the error came from an end-stream trailer. */
+  code?: string;
 }
 
 export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStreamEvent> {
@@ -316,6 +318,7 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
               yield {
                 type: "error",
                 error: errMsg,
+                code: parsed.error.code,
               };
               // Yield a terminal `done` so downstream consumers receive the
               // accumulated stopReason and a consistent termination signal.

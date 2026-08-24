@@ -77,6 +77,32 @@ function errorResponse(req: Request, status: number, message: string, type = "in
   return jsonResponse(req, { error: { message, type } }, status);
 }
 
+// ─── Upstream error classification ──────────────────────────────────────────
+
+interface UpstreamErrorClass {
+  /** HTTP status to surface to the caller. */
+  status: number;
+  /** Standard error type (OpenAI/Anthropic conventions). */
+  type: string;
+  /** OpenAI error code, when the class has a canonical one. */
+  code?: string;
+}
+
+/**
+ * Classify an upstream Devin/Codeium error into an HTTP status and a standard
+ * error type. Codeium reports rate limits as a Connect end-stream trailer with
+ * gRPC code `permission_denied` and a message that explicitly mentions the
+ * rate limit, so the message text is the reliable signal — the code alone
+ * would misclassify real permission errors. The standard gRPC quota code
+ * `resource_exhausted` is accepted as a direct signal.
+ */
+function classifyUpstreamError(message: string | undefined, code?: string): UpstreamErrorClass {
+  if (/rate limit|rate_limit|quota/i.test(message ?? "") || code === "resource_exhausted") {
+    return { status: 429, type: "rate_limit_error", code: "rate_limit_exceeded" };
+  }
+  return { status: 502, type: "api_error" };
+}
+
 // ─── tool_choice mapping ────────────────────────────────────────────────────
 
 /** Map an OpenAI `tool_choice` value onto a Devin `ChatToolChoice`. */
@@ -170,7 +196,7 @@ async function handleChatCompletions(req: Request, reqId: string, trace: ErrorTr
         }
       } else if (ev.type === "usage") usage = ev.usage;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
-      else if (ev.type === "error") throw new Error(ev.error);
+      else if (ev.type === "error") throw Object.assign(new Error(ev.error), { code: ev.code });
     }
 
     const hasToolCalls = toolCalls.length > 0;
@@ -206,9 +232,11 @@ async function handleChatCompletions(req: Request, reqId: string, trace: ErrorTr
       } : undefined,
     });
   } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    const cls = classifyUpstreamError(msg, (err as Error & { code?: string }).code);
     log.error(`[chat/completions ${reqId}] non-stream failed:`, err);
-    trace.flush(err, 502);
-    return errorResponse(req, 502, String((err as Error).message ?? err));
+    trace.flush(err, cls.status);
+    return errorResponse(req, cls.status, msg, cls.type);
   }
 }
 
@@ -292,10 +320,11 @@ function streamOpenAIChat(
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
-            send({ error: { message: ev.error, type: "api_error" } });
+            const cls = classifyUpstreamError(ev.error, ev.code);
+            send({ error: { message: ev.error, type: cls.type, code: cls.code } });
             sentChunks++;
             slog(`upstream error: ${ev.error}`);
-            trace.flush(new Error(ev.error), 200);
+            trace.flush(new Error(ev.error), cls.status);
           }
         }
         send({
@@ -319,10 +348,11 @@ function streamOpenAIChat(
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         slog(`done — upstream chunks: ${upstreamChunks}, client chunks: ${sentChunks}`);
       } catch (err) {
-        send({ error: { message: String((err as Error).message ?? err), type: "api_error" } });
+        const cls = classifyUpstreamError(String((err as Error).message ?? err));
+        send({ error: { message: String((err as Error).message ?? err), type: cls.type, code: cls.code } });
         sentChunks++;
         log.error(`[stream/chat ${reqId}] exception after upstream=${upstreamChunks} client=${sentChunks}:`, err);
-        trace.flush(err, 200);
+        trace.flush(err, cls.status);
       } finally {
         controller.close();
       }
@@ -416,7 +446,7 @@ async function handleResponses(req: Request, reqId: string, trace: ErrorTrace): 
       if (ev.type === "text") text += ev.deltaText;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
       else if (ev.type === "usage" && ev.usage) usage = ev.usage;
-      else if (ev.type === "error") throw new Error(ev.error);
+      else if (ev.type === "error") throw Object.assign(new Error(ev.error), { code: ev.code });
     }
 
     return jsonResponse(req, {
@@ -440,9 +470,11 @@ async function handleResponses(req: Request, reqId: string, trace: ErrorTrace): 
       } : undefined,
     });
   } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    const cls = classifyUpstreamError(msg, (err as Error & { code?: string }).code);
     log.error(`[responses ${reqId}] non-stream failed:`, err);
-    trace.flush(err, 502);
-    return errorResponse(req, 502, String((err as Error).message ?? err));
+    trace.flush(err, cls.status);
+    return errorResponse(req, cls.status, msg, cls.type);
   }
 }
 
@@ -539,9 +571,10 @@ function streamOpenAIResponses(
           } else if (ev.type === "usage") {
             usage = ev.usage;
           } else if (ev.type === "error") {
+            const cls = classifyUpstreamError(ev.error, ev.code);
             slog(`upstream error: ${ev.error}`);
-            send("response.failed", { type: "response.failed", error: { message: ev.error } });
-            trace.flush(new Error(ev.error), 200);
+            send("response.failed", { type: "response.failed", error: { message: ev.error, type: cls.type, code: cls.code } });
+            trace.flush(new Error(ev.error), cls.status);
           }
         }
         slog(`done — upstream chunks: ${upstreamChunks}`);
@@ -583,9 +616,11 @@ function streamOpenAIResponses(
           },
         });
       } catch (err) {
+        const msg = String((err as Error).message ?? err);
+        const cls = classifyUpstreamError(msg);
         log.error(`[stream/responses ${reqId}] exception after upstream=${upstreamChunks}:`, err);
-        send("response.failed", { type: "response.failed", error: { message: String((err as Error).message ?? err) } });
-        trace.flush(err, 200);
+        send("response.failed", { type: "response.failed", error: { message: msg, type: cls.type, code: cls.code } });
+        trace.flush(err, cls.status);
       } finally {
         controller.close();
       }
@@ -662,7 +697,7 @@ async function handleAnthropicMessages(req: Request, reqId: string, trace: Error
         }
       } else if (ev.type === "usage") usage = ev.usage;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
-      else if (ev.type === "error") throw new Error(ev.error);
+      else if (ev.type === "error") throw Object.assign(new Error(ev.error), { code: ev.code });
     }
 
     const hasToolCalls = toolCalls.length > 0;
@@ -695,9 +730,11 @@ async function handleAnthropicMessages(req: Request, reqId: string, trace: Error
       } : { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     });
   } catch (err) {
+    const msg = String((err as Error).message ?? err);
+    const cls = classifyUpstreamError(msg, (err as Error & { code?: string }).code);
     log.error(`[messages ${reqId}] non-stream failed:`, err);
-    trace.flush(err, 502);
-    return errorResponse(req, 502, String((err as Error).message ?? err));
+    trace.flush(err, cls.status);
+    return errorResponse(req, cls.status, msg, cls.type);
   }
 }
 
@@ -802,9 +839,10 @@ function streamAnthropic(
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
+            const cls = classifyUpstreamError(ev.error, ev.code);
             slog(`upstream error: ${ev.error}`);
-            send("error", { type: "error", error: { type: "api_error", message: ev.error } });
-            trace.flush(new Error(ev.error), 200);
+            send("error", { type: "error", error: { type: cls.type, message: ev.error } });
+            trace.flush(new Error(ev.error), cls.status);
           }
         }
 
@@ -818,9 +856,11 @@ function streamAnthropic(
         send("message_stop", { type: "message_stop" });
         slog(`done — upstream chunks: ${upstreamChunks}`);
       } catch (err) {
+        const msg = String((err as Error).message ?? err);
+        const cls = classifyUpstreamError(msg);
         log.error(`[stream/messages ${reqId}] exception after upstream=${upstreamChunks}:`, err);
-        send("error", { type: "error", error: { type: "api_error", message: String((err as Error).message ?? err) } });
-        trace.flush(err, 200);
+        send("error", { type: "error", error: { type: cls.type, message: msg } });
+        trace.flush(err, cls.status);
       } finally {
         controller.close();
       }
