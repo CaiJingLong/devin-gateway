@@ -31,6 +31,7 @@ import {
 } from "./convert.js";
 import { StopReason, type ChatToolChoice } from "./proto.js";
 import { log, truncate } from "./log.js";
+import { ErrorTrace, runTrace, runTraceAsync, currentTrace } from "./error-trace.js";
 
 // ─── Config (populated by startServer) ──────────────────────────────────────
 
@@ -51,6 +52,13 @@ function extractToken(req: Request): string {
   const apiKey = req.headers.get("x-api-key") ?? "";
   // Per-request credentials override the optional DEVIN_API_KEY fallback.
   return bearer || apiKey || DEFAULT_DEVIN_KEY;
+}
+
+/** Extract an error message from a non-2xx Response for trace flushing. */
+function traceFlushError(res: Response, status: number): unknown {
+  // The response body is a JSON error envelope; clone so the original stays
+  // consumable by the caller.
+  return new Error(`HTTP ${status} response (see response body in trace)`);
 }
 
 function jsonResponse(req: Request, body: unknown, status = 200): Response {
@@ -109,7 +117,7 @@ interface OpenAIChatRequest {
   stream_options?: { include_usage?: boolean };
 }
 
-async function handleChatCompletions(req: Request): Promise<Response> {
+async function handleChatCompletions(req: Request, reqId: string, trace: ErrorTrace): Promise<Response> {
   const body = (await req.json()) as OpenAIChatRequest;
   const token = extractToken(req);
   if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
@@ -129,7 +137,7 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 
   if (body.stream) {
     return streamOpenAIChat(req, {
-      token, modelUid, systemPrompt, prompts, tools, maxTokens,
+      reqId, trace, token, modelUid, systemPrompt, prompts, tools, maxTokens,
       temperature: body.temperature, topP: body.top_p, stopSequences: stop,
       cascadeId, modelId: body.model, completionId, created, toolChoice,
       includeUsage: body.stream_options?.include_usage ?? false,
@@ -198,6 +206,8 @@ async function handleChatCompletions(req: Request): Promise<Response> {
       } : undefined,
     });
   } catch (err) {
+    log.error(`[chat/completions ${reqId}] non-stream failed:`, err);
+    trace.flush(err, 502);
     return errorResponse(req, 502, String((err as Error).message ?? err));
   }
 }
@@ -205,23 +215,26 @@ async function handleChatCompletions(req: Request): Promise<Response> {
 function streamOpenAIChat(
   req: Request,
   params: {
-    token: string; modelUid: string; systemPrompt: string;
+    reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
     cascadeId: string; modelId: string; completionId: string; created: number;
     toolChoice?: ChatToolChoice;
     includeUsage: boolean;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created, toolChoice, includeUsage } = params;
+  const { reqId, trace, token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, completionId, created, toolChoice, includeUsage } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
+      // Re-establish ALS context inside the stream callback so devin.ts can
+      // record upstream events via currentTrace().
+      await runTraceAsync(trace, async () => {
       const encoder = new TextEncoder();
       const send = (obj: unknown) => controller.enqueue(encoder.encode(`data: ${JSON.stringify(obj)}\n\n`));
 
       let upstreamChunks = 0;
       let sentChunks = 0;
-      const slog = (msg: string) => log.debug(`[stream/chat ${completionId}] ${msg}`);
+      const slog = (msg: string) => log.debug(`[stream/chat ${reqId}] ${msg}`);
 
       try {
         // Initial role chunk
@@ -282,6 +295,7 @@ function streamOpenAIChat(
             send({ error: { message: ev.error, type: "api_error" } });
             sentChunks++;
             slog(`upstream error: ${ev.error}`);
+            trace.flush(new Error(ev.error), 200);
           }
         }
         send({
@@ -307,10 +321,12 @@ function streamOpenAIChat(
       } catch (err) {
         send({ error: { message: String((err as Error).message ?? err), type: "api_error" } });
         sentChunks++;
-        slog(`exception after upstream=${upstreamChunks} client=${sentChunks}: ${(err as Error).message ?? err}`);
+        log.error(`[stream/chat ${reqId}] exception after upstream=${upstreamChunks} client=${sentChunks}:`, err);
+        trace.flush(err, 200);
       } finally {
         controller.close();
       }
+      }); // runTraceAsync
     },
   });
 
@@ -346,7 +362,7 @@ interface OpenAIResponsesRequest {
   instructions?: string;
 }
 
-async function handleResponses(req: Request): Promise<Response> {
+async function handleResponses(req: Request, reqId: string, trace: ErrorTrace): Promise<Response> {
   const body = (await req.json()) as OpenAIResponsesRequest;
   const token = extractToken(req);
   if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
@@ -381,7 +397,7 @@ async function handleResponses(req: Request): Promise<Response> {
 
   if (body.stream) {
     return streamOpenAIResponses(req, {
-      token, modelUid, systemPrompt, prompts, tools,
+      reqId, trace, token, modelUid, systemPrompt, prompts, tools,
       maxTokens: body.max_output_tokens, temperature: body.temperature, topP: body.top_p,
       cascadeId, modelId: body.model, responseId, created,
     });
@@ -424,6 +440,8 @@ async function handleResponses(req: Request): Promise<Response> {
       } : undefined,
     });
   } catch (err) {
+    log.error(`[responses ${reqId}] non-stream failed:`, err);
+    trace.flush(err, 502);
     return errorResponse(req, 502, String((err as Error).message ?? err));
   }
 }
@@ -431,19 +449,22 @@ async function handleResponses(req: Request): Promise<Response> {
 function streamOpenAIResponses(
   req: Request,
   params: {
-    token: string; modelUid: string; systemPrompt: string;
+    reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
     maxTokens?: number; temperature?: number; topP?: number;
     cascadeId: string; modelId: string; responseId: string; created: number;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, cascadeId, modelId, responseId, created } = params;
+  const { reqId, trace, token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, cascadeId, modelId, responseId, created } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
+      await runTraceAsync(trace, async () => {
       const encoder = new TextEncoder();
       const send = (event: string, obj: unknown) =>
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(obj)}\n\n`));
+      const slog = (msg: string) => log.debug(`[stream/responses ${reqId}] ${msg}`);
+      let upstreamChunks = 0;
 
       try {
         send("response.created", {
@@ -478,6 +499,7 @@ function streamOpenAIResponses(
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
           maxTokens, temperature, topP, cascadeId, baseUrl: DEVIN_BASE_URL || undefined,
         })) {
+          upstreamChunks++;
           if (ev.type === "thinking" && ev.deltaThinking) {
             // Forward reasoning as a summary_text part so thinking models keep
             // the SSE stream alive (Bun closes idle streams after idleTimeout).
@@ -517,9 +539,12 @@ function streamOpenAIResponses(
           } else if (ev.type === "usage") {
             usage = ev.usage;
           } else if (ev.type === "error") {
+            slog(`upstream error: ${ev.error}`);
             send("response.failed", { type: "response.failed", error: { message: ev.error } });
+            trace.flush(new Error(ev.error), 200);
           }
         }
+        slog(`done — upstream chunks: ${upstreamChunks}`);
 
         if (reasoningStarted) {
           send("response.output_item.done", {
@@ -558,10 +583,13 @@ function streamOpenAIResponses(
           },
         });
       } catch (err) {
+        log.error(`[stream/responses ${reqId}] exception after upstream=${upstreamChunks}:`, err);
         send("response.failed", { type: "response.failed", error: { message: String((err as Error).message ?? err) } });
+        trace.flush(err, 200);
       } finally {
         controller.close();
       }
+      }); // runTraceAsync
     },
   });
 
@@ -586,7 +614,7 @@ interface AnthropicRequest {
   thinking?: { type: string; budget_tokens?: number };
 }
 
-async function handleAnthropicMessages(req: Request): Promise<Response> {
+async function handleAnthropicMessages(req: Request, reqId: string, trace: ErrorTrace): Promise<Response> {
   const body = (await req.json()) as AnthropicRequest;
   const token = extractToken(req);
   if (!token) return errorResponse(req, 401, "No Devin API key. Set DEVIN_API_KEY or pass Authorization: Bearer <token> / x-api-key: <token>.", "authentication_error");
@@ -606,7 +634,7 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
 
   if (body.stream) {
     return streamAnthropic(req, {
-      token, modelUid, systemPrompt, prompts, tools,
+      reqId, trace, token, modelUid, systemPrompt, prompts, tools,
       maxTokens: body.max_tokens, temperature: body.temperature, topP: body.top_p,
       stopSequences: body.stop_sequences, cascadeId, modelId: body.model, messageId, toolChoice,
     });
@@ -667,6 +695,8 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
       } : { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 },
     });
   } catch (err) {
+    log.error(`[messages ${reqId}] non-stream failed:`, err);
+    trace.flush(err, 502);
     return errorResponse(req, 502, String((err as Error).message ?? err));
   }
 }
@@ -674,20 +704,23 @@ async function handleAnthropicMessages(req: Request): Promise<Response> {
 function streamAnthropic(
   req: Request,
   params: {
-    token: string; modelUid: string; systemPrompt: string;
+    reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
     prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof anthropicToolsToDevin>;
     maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     cascadeId: string; modelId: string; messageId: string;
     toolChoice?: ChatToolChoice;
   },
 ): Response {
-  const { token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, messageId, toolChoice } = params;
+  const { reqId, trace, token, modelUid, systemPrompt, prompts, tools, maxTokens, temperature, topP, stopSequences, cascadeId, modelId, messageId, toolChoice } = params;
 
   const stream = new ReadableStream({
     async start(controller) {
+      await runTraceAsync(trace, async () => {
       const encoder = new TextEncoder();
       const send = (event: string, obj: unknown) =>
         controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(obj)}\n\n`));
+      const slog = (msg: string) => log.debug(`[stream/messages ${reqId}] ${msg}`);
+      let upstreamChunks = 0;
 
       try {
         send("message_start", {
@@ -726,6 +759,7 @@ function streamAnthropic(
           apiKey: token, modelUid, systemPrompt, messages: prompts, tools,
           maxTokens, temperature, topP, stopSequences, cascadeId, toolChoice, baseUrl: DEVIN_BASE_URL || undefined,
         })) {
+          upstreamChunks++;
           if (ev.type === "thinking" && ev.deltaThinking) {
             if (currentBlockType !== "thinking") {
               stopBlock();
@@ -768,7 +802,9 @@ function streamAnthropic(
           } else if (ev.type === "done") {
             stopReason = ev.stopReason ?? 0;
           } else if (ev.type === "error") {
+            slog(`upstream error: ${ev.error}`);
             send("error", { type: "error", error: { type: "api_error", message: ev.error } });
+            trace.flush(new Error(ev.error), 200);
           }
         }
 
@@ -780,11 +816,15 @@ function streamAnthropic(
           usage: { output_tokens: outputTokens, cache_read_input_tokens: cacheReadTokens, cache_creation_input_tokens: cacheWriteTokens },
         });
         send("message_stop", { type: "message_stop" });
+        slog(`done — upstream chunks: ${upstreamChunks}`);
       } catch (err) {
+        log.error(`[stream/messages ${reqId}] exception after upstream=${upstreamChunks}:`, err);
         send("error", { type: "error", error: { type: "api_error", message: String((err as Error).message ?? err) } });
+        trace.flush(err, 200);
       } finally {
         controller.close();
       }
+      }); // runTraceAsync
     },
   });
 
@@ -795,7 +835,7 @@ function streamAnthropic(
 
 // ─── Models list ─────────────────────────────────────────────────────────────
 
-async function handleModels(req: Request): Promise<Response> {
+async function handleModels(req: Request, reqId: string, trace: ErrorTrace): Promise<Response> {
   const url = new URL(req.url);
   const source = url.searchParams.get("source");
 
@@ -834,6 +874,8 @@ async function handleModels(req: Request): Promise<Response> {
       })),
     });
   } catch (err) {
+    log.error(`[models ${reqId}] discovery failed:`, err);
+    trace.flush(err, 502);
     return errorResponse(req, 502, `Model discovery failed: ${String((err as Error).message ?? err)}`);
   }
 }
@@ -889,31 +931,44 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
         return new Response(null, { status: 204, headers: corsHeaders(req) });
       }
 
-      log.info(`→ ${method} ${path} [${id}]`);
-      if (log.enabled("debug") && method === "POST") {
+      // Error trace: collects request context silently, flushed only on failure.
+      const trace = new ErrorTrace(id, method, path);
+      trace.setToken(extractToken(req));
+      const headers: Record<string, string> = {};
+      req.headers.forEach((v, k) => { headers[k] = v; });
+      trace.setRequestHeaders(headers);
+      if (method === "POST") {
         try {
           const bodyText = await req.clone().text();
-          log.debug(`body [${id}]: ${truncate(bodyText)}`);
+          trace.setRequestBody(bodyText);
+          if (log.enabled("debug")) log.debug(`body [${id}]: ${truncate(bodyText)}`);
         } catch { /* body not cloneable/empty */ }
       }
 
+      log.info(`→ ${method} ${path} [${id}]`);
+
       let res: Response;
+      let handlerError: unknown = null;
       try {
-        // Health
-        if (path === "/health" && method === "GET") {
-          res = jsonResponse(req, { status: "ok", fallback_token: DEFAULT_DEVIN_KEY ? "configured" : "not_set" });
-        } else if (path === "/v1/models" && method === "GET") {
-          res = await handleModels(req);
-        } else if (path === "/v1/chat/completions" && method === "POST") {
-          res = await handleChatCompletions(req);
-        } else if (path === "/v1/responses" && method === "POST") {
-          res = await handleResponses(req);
-        } else if (path === "/v1/messages" && method === "POST") {
-          res = await handleAnthropicMessages(req);
-        } else {
-          res = errorResponse(req, 404, `Not found: ${method} ${path}`);
-        }
+        // Run handlers inside the trace ALS context so devin.ts can record
+        // upstream events via currentTrace().
+        res = await runTraceAsync(trace, async () => {
+          if (path === "/health" && method === "GET") {
+            return jsonResponse(req, { status: "ok", fallback_token: DEFAULT_DEVIN_KEY ? "configured" : "not_set" });
+          } else if (path === "/v1/models" && method === "GET") {
+            return await handleModels(req, id, trace);
+          } else if (path === "/v1/chat/completions" && method === "POST") {
+            return await handleChatCompletions(req, id, trace);
+          } else if (path === "/v1/responses" && method === "POST") {
+            return await handleResponses(req, id, trace);
+          } else if (path === "/v1/messages" && method === "POST") {
+            return await handleAnthropicMessages(req, id, trace);
+          } else {
+            return errorResponse(req, 404, `Not found: ${method} ${path}`);
+          }
+        });
       } catch (err) {
+        handlerError = err;
         log.error(`handler error [${id}] ${method} ${path}:`, err);
         res = errorResponse(req, 500, String((err as Error).message ?? err));
       }
@@ -923,6 +978,16 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
       if (status >= 500) log.error(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
       else if (status >= 400) log.warn(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
       else log.info(`← ${status} ${method} ${path} ${ms}ms [${id}]`);
+
+      // Flush error trace on any non-2xx response (4xx auth errors, 5xx
+      // upstream/handler failures). Stream errors are flushed inside the
+      // stream handlers themselves; this covers non-streaming + handler throws.
+      if (status >= 400) {
+        const err = handlerError ?? traceFlushError(res, status);
+        const file = trace.flush(err, status);
+        if (file) log.info(`error trace [${id}] → ${file}`);
+      }
+
       return res;
     },
   });
@@ -949,5 +1014,10 @@ export async function startServer(options: ServerOptions = {}): Promise<ServerHa
   console.log(DEFAULT_DEVIN_KEY
     ? "  Fallback:  DEVIN_API_KEY configured (used when a request sends no credentials)"
     : "  Fallback:  none — each request must send Authorization / x-api-key");
+  if (log.debugMode) {
+    console.log(`  Debug:     ON — verbose logs tee'd to ${log.filePath}`);
+  } else {
+    console.log("  Debug:     off (set DEBUG=true to enable verbose + file logging)");
+  }
   return { port: PORT, host: HOST, stop };
 }

@@ -13,6 +13,7 @@ coverage/
 
 # Logs
 *.log
+logs/
 
 # Editor and OS files
 .DS_Store

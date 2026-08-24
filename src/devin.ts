@@ -10,6 +10,8 @@
  */
 
 import { gzipSync, gunzipSync } from "node:zlib";
+import { log } from "./log.js";
+import { currentTrace } from "./error-trace.js";
 import {
   type ChatMessagePrompt,
   type ChatToolCall,
@@ -68,6 +70,8 @@ export async function getUserJwt(
   const token = normalizeToken(apiKey);
   const body = encodeGetUserJwtRequest(buildMetadata(token));
   const url = `${baseUrl.replace(/\/+$/, "")}${DEVIN_AUTH_PATH}`;
+  log.debug(`[auth] POST ${url}`);
+  currentTrace()?.add("auth", `POST ${url}`);
   const res = await fetch(url, {
     method: "POST",
     headers: {
@@ -80,7 +84,10 @@ export async function getUserJwt(
   });
   const payload = new Uint8Array(await res.arrayBuffer());
   if (!res.ok) {
-    throw new Error(`Devin auth ${res.status} ${res.statusText}: ${new TextDecoder().decode(payload)}`);
+    const detail = new TextDecoder().decode(payload);
+    log.error(`[auth] upstream returned ${res.status} ${res.statusText}: ${detail}`);
+    currentTrace()?.add("auth", `upstream returned ${res.status} ${res.statusText}`, { detail });
+    throw new Error(`Devin auth ${res.status} ${res.statusText}: ${detail}`);
   }
   let decoded;
   try {
@@ -88,7 +95,13 @@ export async function getUserJwt(
   } catch {
     decoded = decodeGetUserJwtResponse(gunzipSync(payload));
   }
-  if (!decoded.userJwt) throw new Error("Devin auth: empty user JWT");
+  if (!decoded.userJwt) {
+    log.error("[auth] succeeded but user JWT is empty");
+    currentTrace()?.add("auth", "succeeded but user JWT is empty");
+    throw new Error("Devin auth: empty user JWT");
+  }
+  log.debug("[auth] got user JWT");
+  currentTrace()?.add("auth", "got user JWT");
   const customUrl = decoded.customApiServerUrl.trim();
   return {
     userJwt: decoded.userJwt,
@@ -143,7 +156,13 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   try {
     auth = await getUserJwt(token, baseUrl, params.signal ? AbortSignal.any([params.signal, authTimeout]) : authTimeout);
   } catch (err) {
-    if (authTimeout.aborted) throw new Error("Devin auth timed out after 30s");
+    if (authTimeout.aborted) {
+      log.error("[chat] auth timed out after 30s");
+      currentTrace()?.add("auth", "timed out after 30s");
+      throw new Error("Devin auth timed out after 30s");
+    }
+    log.error("[chat] auth failed:", err);
+    currentTrace()?.add("auth", "failed", { error: String((err as Error).message ?? err) });
     throw err;
   }
   const chatBaseUrl = auth.baseUrl ?? baseUrl;
@@ -206,6 +225,8 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   let response: Response;
   try {
     armIdleTimer();
+    log.debug(`[chat] POST ${chatBaseUrl}${CHAT_MESSAGE_PATH} model=${params.modelUid} cascade=${cascadeId}`);
+    currentTrace()?.add("chat", `POST ${chatBaseUrl}${CHAT_MESSAGE_PATH}`, { model: params.modelUid, cascadeId });
     response = await fetch(`${chatBaseUrl}${CHAT_MESSAGE_PATH}`, {
       method: "POST",
       headers: {
@@ -221,15 +242,27 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
     });
   } catch (err) {
     clearTimeout(idleTimer);
-    if (chatController.signal.aborted) throw new Error(`Devin stream timed out: no response within ${UPSTREAM_IDLE_MS / 1000}s`);
+    if (chatController.signal.aborted) {
+      log.error(`[chat] timed out: no response within ${UPSTREAM_IDLE_MS / 1000}s`);
+      currentTrace()?.add("chat", `timed out: no response within ${UPSTREAM_IDLE_MS / 1000}s`);
+      throw new Error(`Devin stream timed out: no response within ${UPSTREAM_IDLE_MS / 1000}s`);
+    }
+    log.error("[chat] fetch failed:", err);
+    currentTrace()?.add("chat", "fetch failed", { error: String((err as Error).message ?? err) });
     throw err;
   }
 
   if (!response.ok) {
     const text = await response.text();
+    log.error(`[chat] upstream returned ${response.status} ${response.statusText}: ${text}`);
+    currentTrace()?.add("chat", `upstream returned ${response.status} ${response.statusText}`, { response: text });
     throw new Error(`Devin API ${response.status} ${response.statusText}: ${text}`);
   }
-  if (!response.body) throw new Error("Devin API: empty response body");
+  if (!response.body) {
+    log.error("[chat] upstream returned empty body");
+    currentTrace()?.add("chat", "upstream returned empty body");
+    throw new Error("Devin API: empty response body");
+  }
 
   const reader = response.body.getReader();
   let pending = Buffer.alloc(0);
@@ -242,7 +275,13 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
       ({ done, value } = await reader.read());
     } catch (err) {
       clearTimeout(idleTimer);
-      if (chatController.signal.aborted) throw new Error(`Devin stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+      if (chatController.signal.aborted) {
+        log.error(`[chat] stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+        currentTrace()?.add("chat", `stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+        throw new Error(`Devin stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+      }
+      log.error("[chat] stream read failed:", err);
+      currentTrace()?.add("chat", "stream read failed", { error: String((err as Error).message ?? err) });
       throw err;
     }
     if (!done) armIdleTimer();
@@ -255,6 +294,8 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
       const len = pending.readUInt32BE(1);
       if (len > MAX_FRAME_PAYLOAD) {
         clearTimeout(idleTimer);
+        log.error(`[chat] frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
+        currentTrace()?.add("chat", `frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
         throw new Error(`Connect frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
       }
       if (pending.length < 5 + len) break;
@@ -269,9 +310,12 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
           try {
             const parsed = JSON.parse(trailer);
             if (parsed?.error?.code) {
+              const errMsg = `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`;
+              log.error(`[chat] upstream end-stream error: ${errMsg}`);
+              currentTrace()?.add("chat", `upstream end-stream error: ${errMsg}`, { code: parsed.error.code });
               yield {
                 type: "error",
-                error: `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`,
+                error: errMsg,
               };
               // Yield a terminal `done` so downstream consumers receive the
               // accumulated stopReason and a consistent termination signal.
@@ -362,6 +406,8 @@ export async function discoverModels(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    log.error(`[discover] upstream returned ${res.status} ${res.statusText}: ${text}`);
+    currentTrace()?.add("discover", `upstream returned ${res.status} ${res.statusText}`, { response: text });
     throw new Error(`Devin model discovery ${res.status} ${res.statusText}: ${text}`);
   }
   const data = new Uint8Array(await res.arrayBuffer());
@@ -369,7 +415,9 @@ export async function discoverModels(
   // Field numbers follow the reference Codeium proto; malformed payloads fail closed.
   try {
     return parseCliModelConfigs(data);
-  } catch {
+  } catch (err) {
+    log.warn(`[discover] failed to parse model configs: ${(err as Error).message ?? err}`);
+    currentTrace()?.add("discover", "failed to parse model configs", { error: String((err as Error).message ?? err) });
     return [];
   }
 }

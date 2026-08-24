@@ -15,9 +15,20 @@ services:
       - DEVIN_BASE_URL=${DEVIN_BASE_URL:-}
       # Log level: debug | info | warn | error (default: info)
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      # Debug mode: set to true|1|yes to force verbose logs and tee them to
+      # /app/logs/gateway.log (mounted below). Default: off.
+      - DEBUG=${DEBUG:-false}
+      # Optional: override the in-container log file path (default /app/logs/gateway.log).
+      # `:-` treats an empty `LOG_FILE=` in .env as unset, falling back to the default.
+      - LOG_FILE=${LOG_FILE:-/app/logs/gateway.log}
+    volumes:
+      # Persist debug-mode logs to the host so they survive container restarts.
+      - ./logs:/app/logs
     restart: always
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/health"]
+      # $$ escapes compose interpolation so $PORT is resolved by the container
+      # shell at runtime, matching whatever port the server actually listens on.
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${PORT:-3000}/health || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
