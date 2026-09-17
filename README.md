@@ -67,7 +67,7 @@ Create `compose.yaml`:
 ```yaml
 services:
   devin-gateway:
-    image: ghcr.io/caijinglong/devin-gateway:0.4.2
+    image: ghcr.io/caijinglong/devin-gateway:latest
     container_name: devin-gateway
     restart: unless-stopped
     ports:
