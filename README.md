@@ -69,7 +69,7 @@ services:
   devin-gateway:
     image: ghcr.io/caijinglong/devin-gateway:latest
     container_name: devin-gateway
-    restart: unless-stopped
+    restart: always
     ports:
       - "127.0.0.1:3000:3000"
     environment:
