@@ -132,7 +132,7 @@ Set `DEVIN_API_KEY` to provide a fallback token for requests that omit `Authoriz
 
 ## Models
 
-The built-in catalog covers Claude, GPT, Gemini, GLM, Grok, Kimi, DeepSeek, SWE, and related model families.
+The built-in catalog covers Claude, Fable, GPT, Gemini, GLM, Grok, Kimi, DeepSeek, SWE, Inkling, Nemotron, and related model families. Regenerate it with `devin models list --format json` (see `src/models.ts` for the field mapping).
 
 ```bash
 # Current models reported by the Devin API; requires a valid token
@@ -145,139 +145,221 @@ curl 'http://localhost:3000/v1/models?source=local'
 > **Note**: `/v1/models` loads the live Devin catalog by default; `?source=remote` is an explicit equivalent. The table below is a snapshot of the built-in catalog at the time shown. Devin's available models change at any time, so this list is **for reference only and is not a constraint on the workflow** — `model` accepts any raw Cascade UID and passes unknown UIDs straight through. Use `GET /v1/models` for the live list.
 
 <details>
-<summary>Model catalog snapshot (2026-07-23)</summary>
+<summary>Model catalog snapshot (2026-09-17)</summary>
 
-**Snapshot time: 2026-07-23**
+**Snapshot time: 2026-09-17**
 
 | Model id | Name | Context window | Max tokens |
 | --- | --- | --- | --- |
-| `claude-5-fable-low` | Claude Fable 5 Low | 1,000,000 | 64,000 |
-| `claude-5-fable-medium` | Claude Fable 5 Medium | 1,000,000 | 64,000 |
-| `claude-5-fable-high` | Claude Fable 5 High | 1,000,000 | 64,000 |
-| `claude-5-fable-xhigh` | Claude Fable 5 XHigh | 1,000,000 | 64,000 |
-| `claude-5-fable-max` | Claude Fable 5 Max | 1,000,000 | 64,000 |
-| `claude-opus-4-6` | Claude Opus 4.6 | 200,000 | 64,000 |
-| `claude-opus-4-6-1m` | Claude Opus 4.6 1M | 1,000,000 | 64,000 |
-| `claude-opus-4-7-low` | Claude Opus 4.7 Low | 1,000,000 | 64,000 |
-| `claude-opus-4-7-medium` | Claude Opus 4.7 Medium | 1,000,000 | 64,000 |
-| `claude-opus-4-7-high` | Claude Opus 4.7 High | 1,000,000 | 64,000 |
-| `claude-opus-4-7-xhigh` | Claude Opus 4.7 XHigh | 1,000,000 | 64,000 |
-| `claude-opus-4-7-max` | Claude Opus 4.7 Max | 1,000,000 | 64,000 |
-| `claude-opus-4-8-low` | Claude Opus 4.8 Low | 1,000,000 | 64,000 |
-| `claude-opus-4-8-medium` | Claude Opus 4.8 Medium | 1,000,000 | 64,000 |
-| `claude-opus-4-8-high` | Claude Opus 4.8 High | 1,000,000 | 64,000 |
-| `claude-opus-4-8-xhigh` | Claude Opus 4.8 XHigh | 1,000,000 | 64,000 |
-| `claude-opus-4-8-max` | Claude Opus 4.8 Max | 1,000,000 | 64,000 |
-| `claude-opus-4-8-low-fast` | Claude Opus 4.8 Low Fast | 1,000,000 | 64,000 |
-| `claude-opus-4-8-medium-fast` | Claude Opus 4.8 Medium Fast | 1,000,000 | 64,000 |
-| `claude-opus-4-8-high-fast` | Claude Opus 4.8 High Fast | 1,000,000 | 64,000 |
-| `claude-opus-4-8-xhigh-fast` | Claude Opus 4.8 XHigh Fast | 1,000,000 | 64,000 |
-| `claude-opus-4-8-max-fast` | Claude Opus 4.8 Max Fast | 1,000,000 | 64,000 |
-| `claude-sonnet-4-6` | Claude Sonnet 4.6 | 200,000 | 64,000 |
-| `claude-sonnet-4-6-1m` | Claude Sonnet 4.6 1M | 1,000,000 | 64,000 |
-| `claude-sonnet-5-low` | Claude Sonnet 5 Low | 1,000,000 | 64,000 |
-| `claude-sonnet-5-medium` | Claude Sonnet 5 Medium | 1,000,000 | 64,000 |
-| `claude-sonnet-5-high` | Claude Sonnet 5 High | 1,000,000 | 64,000 |
-| `claude-sonnet-5-xhigh` | Claude Sonnet 5 XHigh | 1,000,000 | 64,000 |
-| `claude-sonnet-5-max` | Claude Sonnet 5 Max | 1,000,000 | 64,000 |
-| `deepseek-v4` | DeepSeek V4 Pro | 1,048,576 | 64,000 |
-| `gemini-3-1-pro-low` | Gemini 3.1 Pro Low | 1,048,576 | 64,000 |
-| `gemini-3-1-pro-high` | Gemini 3.1 Pro High | 1,048,576 | 64,000 |
-| `gemini-3-5-flash-minimal` | Gemini 3.5 Flash Minimal | 1,048,576 | 64,000 |
-| `gemini-3-5-flash-low` | Gemini 3.5 Flash Low | 1,048,576 | 64,000 |
-| `gemini-3-5-flash-medium` | Gemini 3.5 Flash Medium | 1,048,576 | 64,000 |
-| `gemini-3-5-flash-high` | Gemini 3.5 Flash High | 1,048,576 | 64,000 |
-| `MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL` | Gemini 3 Flash Minimal | 1,048,576 | 64,000 |
-| `MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW` | Gemini 3 Flash Low | 1,048,576 | 64,000 |
-| `MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM` | Gemini 3 Flash Medium | 1,048,576 | 64,000 |
-| `MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH` | Gemini 3 Flash High | 1,048,576 | 64,000 |
-| `glm-5-2` | GLM-5.2 | 200,000 | 64,000 |
-| `glm-5-2-none` | GLM-5.2 None | 200,000 | 64,000 |
-| `glm-5-2-max` | GLM-5.2 Max | 200,000 | 64,000 |
-| `glm-5-2-1m` | GLM-5.2 1M | 1,000,000 | 64,000 |
-| `glm-5-2-none-1m` | GLM-5.2 None 1M | 1,000,000 | 64,000 |
-| `glm-5-2-max-1m` | GLM-5.2 Max 1M | 1,000,000 | 64,000 |
-| `MODEL_GPT_5_2_NONE` | GPT-5.2 None | 384,000 | 64,000 |
-| `MODEL_GPT_5_2_LOW` | GPT-5.2 Low | 384,000 | 64,000 |
-| `MODEL_GPT_5_2_MEDIUM` | GPT-5.2 Medium | 384,000 | 64,000 |
-| `MODEL_GPT_5_2_HIGH` | GPT-5.2 High | 384,000 | 64,000 |
-| `MODEL_GPT_5_2_XHIGH` | GPT-5.2 XHigh | 384,000 | 64,000 |
-| `gpt-5-3-codex-low` | GPT-5.3 Codex Low | 400,000 | 64,000 |
-| `gpt-5-3-codex-medium` | GPT-5.3 Codex Medium | 400,000 | 64,000 |
-| `gpt-5-3-codex-high` | GPT-5.3 Codex High | 400,000 | 64,000 |
-| `gpt-5-3-codex-xhigh` | GPT-5.3 Codex XHigh | 400,000 | 64,000 |
-| `gpt-5-3-codex-low-priority` | GPT-5.3 Codex Fast Low | 400,000 | 64,000 |
-| `gpt-5-3-codex-medium-priority` | GPT-5.3 Codex Fast Medium | 400,000 | 64,000 |
-| `gpt-5-3-codex-high-priority` | GPT-5.3 Codex Fast High | 400,000 | 64,000 |
-| `gpt-5-3-codex-xhigh-priority` | GPT-5.3 Codex Fast XHigh | 400,000 | 64,000 |
-| `gpt-5-4-none` | GPT-5.4 None | 272,000 | 64,000 |
-| `gpt-5-4-low` | GPT-5.4 Low | 272,000 | 64,000 |
-| `gpt-5-4-medium` | GPT-5.4 Medium | 272,000 | 64,000 |
-| `gpt-5-4-high` | GPT-5.4 High | 272,000 | 64,000 |
-| `gpt-5-4-xhigh` | GPT-5.4 XHigh | 272,000 | 64,000 |
-| `gpt-5-4-none-priority` | GPT-5.4 Fast None | 272,000 | 64,000 |
-| `gpt-5-4-low-priority` | GPT-5.4 Fast Low | 272,000 | 64,000 |
-| `gpt-5-4-medium-priority` | GPT-5.4 Fast Medium | 272,000 | 64,000 |
-| `gpt-5-4-high-priority` | GPT-5.4 Fast High | 272,000 | 64,000 |
-| `gpt-5-4-xhigh-priority` | GPT-5.4 Fast XHigh | 272,000 | 64,000 |
-| `gpt-5-4-mini-low` | GPT-5.4 Mini Low | 400,000 | 64,000 |
-| `gpt-5-4-mini-medium` | GPT-5.4 Mini Medium | 400,000 | 64,000 |
-| `gpt-5-4-mini-high` | GPT-5.4 Mini High | 400,000 | 64,000 |
-| `gpt-5-4-mini-xhigh` | GPT-5.4 Mini XHigh | 400,000 | 64,000 |
-| `gpt-5-5-none` | GPT-5.5 None | 272,000 | 64,000 |
-| `gpt-5-5-low` | GPT-5.5 Low | 272,000 | 64,000 |
-| `gpt-5-5-medium` | GPT-5.5 Medium | 272,000 | 64,000 |
-| `gpt-5-5-high` | GPT-5.5 High | 272,000 | 64,000 |
-| `gpt-5-5-xhigh` | GPT-5.5 XHigh | 272,000 | 64,000 |
-| `gpt-5-5-none-priority` | GPT-5.5 Fast None | 272,000 | 64,000 |
-| `gpt-5-5-low-priority` | GPT-5.5 Fast Low | 272,000 | 64,000 |
-| `gpt-5-5-medium-priority` | GPT-5.5 Fast Medium | 272,000 | 64,000 |
-| `gpt-5-5-high-priority` | GPT-5.5 Fast High | 272,000 | 64,000 |
-| `gpt-5-5-xhigh-priority` | GPT-5.5 Fast XHigh | 272,000 | 64,000 |
-| `gpt-5-6-luna-none` | GPT-5.6 Luna None | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-low` | GPT-5.6 Luna Low | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-medium` | GPT-5.6 Luna Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-high` | GPT-5.6 Luna High | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-xhigh` | GPT-5.6 Luna XHigh | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-max` | GPT-5.6 Luna Max | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-none-priority` | GPT-5.6 Luna Fast None | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-low-priority` | GPT-5.6 Luna Fast Low | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-medium-priority` | GPT-5.6 Luna Fast Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-high-priority` | GPT-5.6 Luna Fast High | 1,000,000 | 64,000 |
-| `gpt-5-6-luna-xhigh-priority` | GPT-5.6 Luna Fast XHigh | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-none` | GPT-5.6 Sol None | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-low` | GPT-5.6 Sol Low | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-medium` | GPT-5.6 Sol Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-high` | GPT-5.6 Sol High | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-xhigh` | GPT-5.6 Sol XHigh | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-max` | GPT-5.6 Sol Max | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-none-priority` | GPT-5.6 Sol Fast None | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-low-priority` | GPT-5.6 Sol Fast Low | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-medium-priority` | GPT-5.6 Sol Fast Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-high-priority` | GPT-5.6 Sol Fast High | 1,000,000 | 64,000 |
-| `gpt-5-6-sol-xhigh-priority` | GPT-5.6 Sol Fast XHigh | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-none` | GPT-5.6 Terra None | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-low` | GPT-5.6 Terra Low | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-medium` | GPT-5.6 Terra Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-high` | GPT-5.6 Terra High | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-xhigh` | GPT-5.6 Terra XHigh | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-max` | GPT-5.6 Terra Max | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-none-priority` | GPT-5.6 Terra Fast None | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-low-priority` | GPT-5.6 Terra Fast Low | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-medium-priority` | GPT-5.6 Terra Fast Medium | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-high-priority` | GPT-5.6 Terra Fast High | 1,000,000 | 64,000 |
-| `gpt-5-6-terra-xhigh-priority` | GPT-5.6 Terra Fast XHigh | 1,000,000 | 64,000 |
-| `grok-4-5-low` | Grok 4.5 Low | 500,000 | 64,000 |
-| `grok-4-5-medium` | Grok 4.5 Medium | 500,000 | 64,000 |
-| `grok-4-5-high` | Grok 4.5 High | 500,000 | 64,000 |
-| `kimi-k2-6` | Kimi K2.6 | 262,144 | 64,000 |
-| `kimi-k2-7` | Kimi K2.7 | 262,144 | 64,000 |
-| `nemotron-3-ultra-nvfp4` | Nemotron 3 Ultra | 262,144 | 64,000 |
-| `swe-1-6` | SWE-1.6 | 200,000 | 64,000 |
-| `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 64,000 |
-| `swe-1-7` | SWE-1.7 Max | 262,000 | 64,000 |
-| `swe-1-7-lightning` | SWE-1.7 Lightning | 202,752 | 64,000 |
-
+| `claude-opus-5-medium` | Claude Opus 5 Medium | 1,000,000 | 128,000 |
+| `claude-opus-5-low` | Claude Opus 5 Low | 1,000,000 | 128,000 |
+| `claude-opus-5-high` | Claude Opus 5 High | 1,000,000 | 128,000 |
+| `claude-opus-5-xhigh` | Claude Opus 5 XHigh | 1,000,000 | 128,000 |
+| `claude-opus-5-max` | Claude Opus 5 Max | 1,000,000 | 128,000 |
+| `claude-opus-5-low-fast` | Claude Opus 5 Low Fast | 1,000,000 | 128,000 |
+| `claude-opus-5-medium-fast` | Claude Opus 5 Medium Fast | 1,000,000 | 128,000 |
+| `claude-opus-5-high-fast` | Claude Opus 5 High Fast | 1,000,000 | 128,000 |
+| `claude-opus-5-xhigh-fast` | Claude Opus 5 XHigh Fast | 1,000,000 | 128,000 |
+| `claude-opus-5-max-fast` | Claude Opus 5 Max Fast | 1,000,000 | 128,000 |
+| `claude-fable-5-1-medium` | Claude Fable 5.1 Medium | 1,000,000 | 128,000 |
+| `claude-fable-5-1-low` | Claude Fable 5.1 Low | 1,000,000 | 128,000 |
+| `claude-fable-5-1-high` | Claude Fable 5.1 High | 1,000,000 | 128,000 |
+| `claude-fable-5-1-xhigh` | Claude Fable 5.1 XHigh | 1,000,000 | 128,000 |
+| `claude-fable-5-1-max` | Claude Fable 5.1 Max | 1,000,000 | 128,000 |
+| `claude-sonnet-5-medium` | Claude Sonnet 5 Medium | 1,000,000 | 128,000 |
+| `claude-sonnet-5-low` | Claude Sonnet 5 Low | 1,000,000 | 128,000 |
+| `claude-sonnet-5-high` | Claude Sonnet 5 High | 1,000,000 | 128,000 |
+| `claude-sonnet-5-xhigh` | Claude Sonnet 5 XHigh | 1,000,000 | 128,000 |
+| `claude-sonnet-5-max` | Claude Sonnet 5 Max | 1,000,000 | 128,000 |
+| `gemini-3-8-flash-medium` | Gemini 3.8 Flash Medium | 1,048,576 | 65,535 |
+| `gemini-3-8-flash-low` | Gemini 3.8 Flash Low | 1,048,576 | 65,535 |
+| `gemini-3-8-flash-high` | Gemini 3.8 Flash High | 1,048,576 | 65,535 |
+| `gpt-5-6-sol-medium` | GPT-5.6 Sol Medium Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-none` | GPT-5.6 Sol No Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-low` | GPT-5.6 Sol Low Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-high` | GPT-5.6 Sol High Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-xhigh` | GPT-5.6 Sol XHigh Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-max` | GPT-5.6 Sol Max Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-none-priority` | GPT-5.6 Sol No Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-low-priority` | GPT-5.6 Sol Low Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-medium-priority` | GPT-5.6 Sol Medium Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-high-priority` | GPT-5.6 Sol High Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-xhigh-priority` | GPT-5.6 Sol XHigh Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-sol-max-priority` | GPT-5.6 Sol Max Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-medium` | GPT-5.6 Luna Medium Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-none` | GPT-5.6 Luna No Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-low` | GPT-5.6 Luna Low Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-high` | GPT-5.6 Luna High Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-xhigh` | GPT-5.6 Luna XHigh Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-max` | GPT-5.6 Luna Max Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-none-priority` | GPT-5.6 Luna No Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-low-priority` | GPT-5.6 Luna Low Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-medium-priority` | GPT-5.6 Luna Medium Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-high-priority` | GPT-5.6 Luna High Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-xhigh-priority` | GPT-5.6 Luna XHigh Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-luna-max-priority` | GPT-5.6 Luna Max Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-6-astra-medium` | GPT-6 Astra Medium Thinking | 1,000,000 | 128,000 |
+| `gpt-6-astra-low` | GPT-6 Astra Low Thinking | 1,000,000 | 128,000 |
+| `gpt-6-astra-high` | GPT-6 Astra High Thinking | 1,000,000 | 128,000 |
+| `gpt-6-astra-xhigh` | GPT-6 Astra XHigh Thinking | 1,000,000 | 128,000 |
+| `gpt-6-astra-max` | GPT-6 Astra Max Thinking | 1,000,000 | 128,000 |
+| `gpt-6-astra-low-priority` | GPT-6 Astra Low Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-6-astra-medium-priority` | GPT-6 Astra Medium Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-6-astra-high-priority` | GPT-6 Astra High Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-6-astra-xhigh-priority` | GPT-6 Astra XHigh Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-6-astra-max-priority` | GPT-6 Astra Max Thinking Fast | 1,000,000 | 128,000 |
+| `glm-5-2` | GLM-5.2 High | 200,000 | 128,000 |
+| `glm-5-2-max` | GLM-5.2 Max | 200,000 | 128,000 |
+| `glm-5-2-1m` | GLM-5.2 High 1M | 1,000,000 | 128,000 |
+| `glm-5-2-max-1m` | GLM-5.2 Max 1M | 1,000,000 | 128,000 |
+| `glm-5-2-none` | GLM-5.2 No Thinking | 200,000 | 128,000 |
+| `glm-5-2-none-1m` | GLM-5.2 No Thinking 1M | 1,000,000 | 128,000 |
+| `kimi-k3-high` | Kimi K3 High | 1,048,576 | 131,072 |
+| `kimi-k3-low` | Kimi K3 Low | 1,048,576 | 131,072 |
+| `kimi-k3-max` | Kimi K3 Max | 1,048,576 | 131,072 |
+| `glm-5-3-low` | GLM-5.3 Low | 1,048,576 | 128,000 |
+| `glm-5-3-high` | GLM-5.3 High | 1,048,576 | 128,000 |
+| `glm-5-3-max` | GLM-5.3 Max | 1,048,576 | 128,000 |
+| `swe-1-7-lightning` | SWE-1.7 Lightning Max | 202,752 | 96,000 |
+| `swe-1-7-lightning-medium` | SWE-1.7 Lightning Medium | 202,752 | 96,000 |
+| `swe-2-high` | SWE-2 High | 262,000 | 128,000 |
+| `swe-2-medium` | SWE-2 Medium | 262,000 | 128,000 |
+| `swe-2-max` | SWE-2 Max | 262,000 | 128,000 |
+| `claude-opus-4-7-medium` | Claude Opus 4.7 Medium | 1,000,000 | 128,000 |
+| `claude-opus-4-7-low` | Claude Opus 4.7 Low | 1,000,000 | 128,000 |
+| `claude-opus-4-7-high` | Claude Opus 4.7 High | 1,000,000 | 128,000 |
+| `claude-opus-4-7-xhigh` | Claude Opus 4.7 XHigh | 1,000,000 | 128,000 |
+| `claude-opus-4-7-max` | Claude Opus 4.7 Max | 1,000,000 | 128,000 |
+| `claude-opus-4-8-medium` | Claude Opus 4.8 Medium | 1,000,000 | 128,000 |
+| `claude-opus-4-8-low` | Claude Opus 4.8 Low | 1,000,000 | 128,000 |
+| `claude-opus-4-8-high` | Claude Opus 4.8 High | 1,000,000 | 128,000 |
+| `claude-opus-4-8-xhigh` | Claude Opus 4.8 XHigh | 1,000,000 | 128,000 |
+| `claude-opus-4-8-max` | Claude Opus 4.8 Max | 1,000,000 | 128,000 |
+| `claude-opus-4-8-low-fast` | Claude Opus 4.8 Low Fast | 1,000,000 | 128,000 |
+| `claude-opus-4-8-medium-fast` | Claude Opus 4.8 Medium Fast | 1,000,000 | 128,000 |
+| `claude-opus-4-8-high-fast` | Claude Opus 4.8 High Fast | 1,000,000 | 128,000 |
+| `claude-opus-4-8-xhigh-fast` | Claude Opus 4.8 XHigh Fast | 1,000,000 | 128,000 |
+| `claude-opus-4-8-max-fast` | Claude Opus 4.8 Max Fast | 1,000,000 | 128,000 |
+| `claude-5-fable-low` | Claude Fable 5 Low | 1,000,000 | 128,000 |
+| `claude-5-fable-medium` | Claude Fable 5 Medium | 1,000,000 | 128,000 |
+| `claude-5-fable-high` | Claude Fable 5 High | 1,000,000 | 128,000 |
+| `claude-5-fable-xhigh` | Claude Fable 5 XHigh | 1,000,000 | 128,000 |
+| `claude-5-fable-max` | Claude Fable 5 Max | 1,000,000 | 128,000 |
+| `gemini-3-5-flash-minimal` | Gemini 3.5 Flash Minimal | 1,048,576 | 65,535 |
+| `gemini-3-5-flash-low` | Gemini 3.5 Flash Low | 1,048,576 | 65,535 |
+| `gemini-3-5-flash-medium` | Gemini 3.5 Flash Medium | 1,048,576 | 65,535 |
+| `gemini-3-5-flash-high` | Gemini 3.5 Flash High | 1,048,576 | 65,535 |
+| `gemini-3-6-flash-minimal` | Gemini 3.6 Flash Minimal | 1,048,576 | 65,535 |
+| `gemini-3-6-flash-low` | Gemini 3.6 Flash Low | 1,048,576 | 65,535 |
+| `gemini-3-6-flash-medium` | Gemini 3.6 Flash Medium | 1,048,576 | 65,535 |
+| `gemini-3-6-flash-high` | Gemini 3.6 Flash High | 1,048,576 | 65,535 |
+| `gemini-3-7-flash-low` | Gemini 3.7 Flash Low | 1,048,576 | 65,535 |
+| `gemini-3-7-flash-medium` | Gemini 3.7 Flash Medium | 1,048,576 | 65,535 |
+| `gemini-3-7-flash-high` | Gemini 3.7 Flash High | 1,048,576 | 65,535 |
+| `gpt-5-6-terra-none` | GPT-5.6 Terra No Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-low` | GPT-5.6 Terra Low Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-medium` | GPT-5.6 Terra Medium Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-high` | GPT-5.6 Terra High Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-xhigh` | GPT-5.6 Terra XHigh Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-max` | GPT-5.6 Terra Max Thinking | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-none-priority` | GPT-5.6 Terra No Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-low-priority` | GPT-5.6 Terra Low Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-medium-priority` | GPT-5.6 Terra Medium Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-high-priority` | GPT-5.6 Terra High Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-xhigh-priority` | GPT-5.6 Terra XHigh Thinking Fast | 1,000,000 | 128,000 |
+| `gpt-5-6-terra-max-priority` | GPT-5.6 Terra Max Thinking Fast | 1,000,000 | 128,000 |
+| `grok-4-5-low` | Grok 4.5 Low | 500,000 | 100,000 |
+| `grok-4-5-medium` | Grok 4.5 Medium | 500,000 | 100,000 |
+| `grok-4-5-high` | Grok 4.5 High | 500,000 | 100,000 |
+| `grok-4-6-low` | Grok 4.6 Low | 500,000 | 100,000 |
+| `grok-4-6-medium` | Grok 4.6 Medium | 500,000 | 100,000 |
+| `grok-4-6-high` | Grok 4.6 High | 500,000 | 100,000 |
+| `grok-4-6-xhigh` | Grok 4.6 XHigh | 500,000 | 100,000 |
+| `inkling-none` | Inkling None | 1,048,576 | 131,072 |
+| `inkling-low` | Inkling Low | 1,048,576 | 131,072 |
+| `inkling-medium` | Inkling Medium | 1,048,576 | 131,072 |
+| `inkling-high` | Inkling High | 1,048,576 | 131,072 |
+| `inkling-xhigh` | Inkling X-High | 1,048,576 | 131,072 |
+| `inkling-max` | Inkling Max | 1,048,576 | 131,072 |
+| `glm-5-3-flash-low` | GLM-5.3 Flash Low | 1,000,000 | 128,000 |
+| `glm-5-3-flash-high` | GLM-5.3 Flash High | 1,000,000 | 128,000 |
+| `glm-5-3-flash-max` | GLM-5.3 Flash Max | 1,000,000 | 128,000 |
+| `deepseek-v4-flash-high` | DeepSeek V4 Flash High | 1,048,576 | 384,000 |
+| `deepseek-v4-flash-max` | DeepSeek V4 Flash Max | 1,048,576 | 384,000 |
+| `deepseek-v4-1-flash-high` | DeepSeek V4.1 Flash High | 1,048,576 | 384,000 |
+| `deepseek-v4-1-flash-max` | DeepSeek V4.1 Flash Max | 1,048,576 | 384,000 |
+| `swe-1-7` | SWE-1.7 Max | 262,000 | 128,000 |
+| `swe-1-7-medium` | SWE-1.7 Medium | 262,000 | 128,000 |
+| `claude-opus-4-6` | Claude Opus 4.6 | 200,000 | 128,000 |
+| `claude-opus-4-6-thinking` | Claude Opus 4.6 Thinking | 200,000 | 128,000 |
+| `claude-opus-4-6-1m` | Claude Opus 4.6 1M | 1,000,000 | 128,000 |
+| `claude-opus-4-6-thinking-1m` | Claude Opus 4.6 Thinking 1M | 1,000,000 | 128,000 |
+| `gpt-5-4-none` | GPT-5.4 No Thinking | 272,000 | 128,000 |
+| `gpt-5-4-low` | GPT-5.4 Low Thinking | 272,000 | 128,000 |
+| `gpt-5-4-medium` | GPT-5.4 Medium Thinking | 272,000 | 128,000 |
+| `gpt-5-4-high` | GPT-5.4 High Thinking | 272,000 | 128,000 |
+| `gpt-5-4-xhigh` | GPT-5.4 XHigh Thinking | 272,000 | 128,000 |
+| `gpt-5-4-none-priority` | GPT-5.4 No Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-4-low-priority` | GPT-5.4 Low Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-4-medium-priority` | GPT-5.4 Medium Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-4-high-priority` | GPT-5.4 High Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-4-xhigh-priority` | GPT-5.4 XHigh Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-5-none` | GPT-5.5 No Thinking | 272,000 | 128,000 |
+| `gpt-5-5-low` | GPT-5.5 Low Thinking | 272,000 | 128,000 |
+| `gpt-5-5-medium` | GPT-5.5 Medium Thinking | 272,000 | 128,000 |
+| `gpt-5-5-high` | GPT-5.5 High Thinking | 272,000 | 128,000 |
+| `gpt-5-5-xhigh` | GPT-5.5 XHigh Thinking | 272,000 | 128,000 |
+| `gpt-5-5-none-priority` | GPT-5.5 No Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-5-low-priority` | GPT-5.5 Low Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-5-medium-priority` | GPT-5.5 Medium Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-5-high-priority` | GPT-5.5 High Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-5-xhigh-priority` | GPT-5.5 XHigh Thinking Fast | 272,000 | 128,000 |
+| `gpt-5-4-mini-low` | GPT-5.4 Mini Low Thinking | 400,000 | 128,000 |
+| `gpt-5-4-mini-medium` | GPT-5.4 Mini Medium Thinking | 400,000 | 128,000 |
+| `gpt-5-4-mini-high` | GPT-5.4 Mini High Thinking | 400,000 | 128,000 |
+| `gpt-5-4-mini-xhigh` | GPT-5.4 Mini XHigh Thinking | 400,000 | 128,000 |
+| `claude-sonnet-4-6` | Claude Sonnet 4.6 | 200,000 | 128,000 |
+| `claude-sonnet-4-6-thinking` | Claude Sonnet 4.6 Thinking | 200,000 | 128,000 |
+| `claude-sonnet-4-6-1m` | Claude Sonnet 4.6 1M | 1,000,000 | 128,000 |
+| `claude-sonnet-4-6-thinking-1m` | Claude Sonnet 4.6 Thinking 1M | 1,000,000 | 128,000 |
+| `MODEL_GPT_5_2_LOW` | GPT-5.2 Low Thinking | 384,000 | 128,000 |
+| `MODEL_GPT_5_2_MEDIUM` | GPT-5.2 Medium Thinking | 384,000 | 128,000 |
+| `MODEL_GPT_5_2_NONE` | GPT-5.2 No Thinking | 384,000 | 128,000 |
+| `MODEL_GPT_5_2_HIGH` | GPT-5.2 High Thinking | 384,000 | 128,000 |
+| `MODEL_GPT_5_2_XHIGH` | GPT-5.2 XHigh Thinking | 384,000 | 128,000 |
+| `MODEL_CLAUDE_4_5_OPUS` | Claude Opus 4.5 | 200,000 | 64,000 |
+| `MODEL_CLAUDE_4_5_OPUS_THINKING` | Claude Opus 4.5 Thinking | 200,000 | 64,000 |
+| `MODEL_PRIVATE_11` | Claude Haiku 4.5 | 200,000 | 64,000 |
+| `MODEL_PRIVATE_2` | Claude Sonnet 4.5 | 200,000 | 64,000 |
+| `MODEL_PRIVATE_3` | Claude Sonnet 4.5 Thinking | 200,000 | 64,000 |
+| `MODEL_CHAT_GPT_4_1_2025_04_14` | GPT-4.1 | 1,047,576 | 32,768 |
+| `MODEL_PRIVATE_12` | GPT-5.1 No Thinking | 272,000 | 128,000 |
+| `MODEL_PRIVATE_13` | GPT-5.1 Low Thinking | 272,000 | 128,000 |
+| `MODEL_PRIVATE_14` | GPT-5.1 Medium Thinking | 272,000 | 128,000 |
+| `MODEL_PRIVATE_15` | GPT-5.1 High Thinking | 272,000 | 128,000 |
+| `gpt-5-3-codex-low` | GPT-5.3-Codex Low | 400,000 | 128,000 |
+| `gpt-5-3-codex-medium` | GPT-5.3-Codex Medium | 400,000 | 128,000 |
+| `gpt-5-3-codex-high` | GPT-5.3-Codex High | 400,000 | 128,000 |
+| `gpt-5-3-codex-xhigh` | GPT-5.3-Codex X-High | 400,000 | 128,000 |
+| `gpt-5-3-codex-low-priority` | GPT-5.3-Codex Low Fast | 400,000 | 128,000 |
+| `gpt-5-3-codex-medium-priority` | GPT-5.3-Codex Medium Fast | 400,000 | 128,000 |
+| `gpt-5-3-codex-high-priority` | GPT-5.3-Codex High Fast | 400,000 | 128,000 |
+| `gpt-5-3-codex-xhigh-priority` | GPT-5.3-Codex XHigh Fast | 400,000 | 128,000 |
+| `kimi-k2-6` | Kimi K2.6 | 262,144 | 8,192 |
+| `kimi-k2-7` | Kimi K2.7 | 262,144 | 16,000 |
+| `nemotron-3-ultra-none` | Nemotron 3 Ultra None | 1,000,000 | 32,768 |
+| `nemotron-3-ultra-medium` | Nemotron 3 Ultra Medium | 1,000,000 | 32,768 |
+| `nemotron-3-ultra-high` | Nemotron 3 Ultra High | 1,000,000 | 32,768 |
+| `swe-1-6` | SWE-1.6 | 200,000 | 128,000 |
+| `swe-1-6-fast` | SWE-1.6 Fast | 200,000 | 128,000 |
+| `gemini-3-1-pro-low` | Gemini 3.1 Pro Low Thinking | 1,048,576 | 65,535 |
+| `gemini-3-1-pro-high` | Gemini 3.1 Pro High Thinking | 1,048,576 | 65,535 |
+| `MODEL_GOOGLE_GEMINI_3_0_FLASH_MINIMAL` | Gemini 3 Flash Minimal | 1,048,576 | 65,535 |
+| `MODEL_GOOGLE_GEMINI_3_0_FLASH_LOW` | Gemini 3 Flash Low | 1,048,576 | 65,535 |
+| `MODEL_GOOGLE_GEMINI_3_0_FLASH_MEDIUM` | Gemini 3 Flash Medium | 1,048,576 | 65,535 |
+| `MODEL_GOOGLE_GEMINI_3_0_FLASH_HIGH` | Gemini 3 Flash High | 1,048,576 | 65,535 |
+| `deepseek-v4-pro-high` | DeepSeek V4 Pro High | 1,048,576 | 384,000 |
+| `deepseek-v4-pro-max` | DeepSeek V4 Pro Max | 1,048,576 | 384,000 |
 </details>
 
 ## Configuration

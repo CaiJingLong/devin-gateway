@@ -29,7 +29,7 @@ import {
   type AnthropicMessage,
   type AnthropicTool,
 } from "./convert.js";
-import { StopReason, type ChatToolChoice } from "./proto.js";
+import { StopReason, type ChatMessagePrompt, type ChatToolChoice, type ChatToolDefinition } from "./proto.js";
 import { log, truncate } from "./log.js";
 import { ErrorTrace, runTrace, runTraceAsync, currentTrace } from "./error-trace.js";
 
@@ -244,8 +244,9 @@ function streamOpenAIChat(
   req: Request,
   params: {
     reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
-    prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
+    prompts: ChatMessagePrompt[]; tools: ChatToolDefinition[];
     cascadeId: string; modelId: string; completionId: string; created: number;
+    maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     toolChoice?: ChatToolChoice;
     includeUsage: boolean;
   },
@@ -482,7 +483,7 @@ function streamOpenAIResponses(
   req: Request,
   params: {
     reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
-    prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof openaiToolsToDevin>;
+    prompts: ChatMessagePrompt[]; tools: ChatToolDefinition[];
     maxTokens?: number; temperature?: number; topP?: number;
     cascadeId: string; modelId: string; responseId: string; created: number;
   },
@@ -742,7 +743,7 @@ function streamAnthropic(
   req: Request,
   params: {
     reqId: string; trace: ErrorTrace; token: string; modelUid: string; systemPrompt: string;
-    prompts: ReturnType<typeof toDevinPrompts>; tools: ReturnType<typeof anthropicToolsToDevin>;
+    prompts: ChatMessagePrompt[]; tools: ChatToolDefinition[];
     maxTokens?: number; temperature?: number; topP?: number; stopSequences?: string[];
     cascadeId: string; modelId: string; messageId: string;
     toolChoice?: ChatToolChoice;
@@ -889,6 +890,10 @@ async function handleModels(req: Request, reqId: string, trace: ErrorTrace): Pro
         object: "model",
         created: 1700000000,
         owned_by: "devin",
+        context_window: m.contextWindow,
+        max_tokens: m.maxTokens,
+        reasoning: m.reasoning,
+        supports_images: m.supportsImages,
       })),
     });
   }

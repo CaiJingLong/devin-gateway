@@ -458,23 +458,36 @@ function parseModelFeaturesThinking(decoder: ProtoDecoder): boolean {
   return false;
 }
 
-/** Parse `ModelInfo` (field 23 of `ClientModelConfig`) for its `model_features` (field 6). */
-function parseModelInfoThinking(decoder: ProtoDecoder): boolean {
+/** Subset of `ModelInfo` (field 23 of `ClientModelConfig`) the gateway needs. */
+interface ModelInfoFields {
+  /** `max_output_tokens` (field 13), 0 when the upstream omits it. */
+  maxOutputTokens: number;
+  /** `model_features.supports_thinking` (field 6, inner field 15). */
+  supportsThinking: boolean;
+}
+
+/** Parse `ModelInfo` (field 23 of `ClientModelConfig`); scans to the end — field order is not guaranteed. */
+function parseModelInfo(decoder: ProtoDecoder): ModelInfoFields {
+  const info: ModelInfoFields = { maxOutputTokens: 0, supportsThinking: false };
   while (!decoder.done) {
     const { field, wire } = decoder.readTag();
-    if (field === 6 && wire === 2) {
-      return decoder.readMessage(parseModelFeaturesThinking);
+    if (field === 13 && wire === 0) {
+      info.maxOutputTokens = Number(decoder.readVarint());
+    } else if (field === 6 && wire === 2) {
+      info.supportsThinking = decoder.readMessage(parseModelFeaturesThinking);
+    } else {
+      decoder.skip(wire);
     }
-    decoder.skip(wire);
   }
-  return false;
+  return info;
 }
 
 function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
   let id = "";
   let label = "";
   let disabled = false;
-  let configuredMaxTokens = 0;
+  let contextWindowTokens = 0;
+  let maxOutputTokens = 0;
   let supportsImages = false;
   let supportsThinking = false;
 
@@ -487,11 +500,13 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
     } else if (field === 5 && wire === 0) {
       supportsImages = decoder.readVarint() !== 0n;
     } else if (field === 18 && wire === 0) {
-      configuredMaxTokens = Number(decoder.readVarint());
+      contextWindowTokens = Number(decoder.readVarint());
     } else if (field === 22 && wire === 2) {
       id = decoder.readString();
     } else if (field === 23 && wire === 2) {
-      supportsThinking = decoder.readMessage(parseModelInfoThinking);
+      const info = decoder.readMessage(parseModelInfo);
+      maxOutputTokens = info.maxOutputTokens;
+      supportsThinking = info.supportsThinking;
     } else {
       decoder.skip(wire);
     }
@@ -501,8 +516,10 @@ function parseClientModelConfig(decoder: ProtoDecoder): DiscoveredModel | null {
 
   const reasoning = !NO_REASONING_LABEL_PATTERN.test(label) &&
     (supportsThinking || REASONING_LABEL_PATTERN.test(label));
-  const contextWindow = configuredMaxTokens > 0 ? configuredMaxTokens : 200_000;
-  const maxTokens = Math.min(configuredMaxTokens > 0 ? configuredMaxTokens : 64_000, 64_000);
+  const contextWindow = contextWindowTokens > 0 ? contextWindowTokens : 200_000;
+  // Upstream reports `max_output_tokens` for every catalog entry; 64K stays as the
+  // conservative fallback for an entry that omits it.
+  const maxTokens = maxOutputTokens > 0 ? maxOutputTokens : 64_000;
   return {
     id: id.trim(),
     name: label.trim() || id.trim(),
