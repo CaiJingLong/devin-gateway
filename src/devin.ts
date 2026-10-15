@@ -37,8 +37,8 @@ import {
 const DEVIN_API_URL = "https://server.codeium.com";
 const DEVIN_AUTH_PATH = "/exa.auth_pb.AuthService/GetUserJwt";
 const CHAT_MESSAGE_PATH = "/exa.api_server_pb.ApiServerService/GetChatMessage";
-// Devin Local models require the Desktop identity rather than legacy Windsurf.
-const DEVIN_CLIENT_NAME = "devin-desktop";
+// Match the official Devin CLI identity for both chat and model discovery.
+const DEVIN_CLIENT_NAME = "chisel";
 const DEVIN_IDE_VERSION = "3.2.23";
 const DEVIN_EXTENSION_VERSION = "1.48.2";
 const SESSION_TOKEN_PREFIX = "devin-session-token$";
@@ -409,12 +409,10 @@ export async function discoverModels(
 ): Promise<DiscoveredModel[]> {
   const token = normalizeToken(apiKey);
   const enc = new ProtoEncoder();
-  // GetCliModelConfigs currently returns only a fallback model for Desktop.
-  // Keep the Windsurf catalog identity here; auth/chat use DEVIN_CLIENT_NAME.
   enc.message(1, (e) => {
-    e.string(1, "windsurf");
+    e.string(1, DEVIN_CLIENT_NAME);
     e.string(7, DEVIN_IDE_VERSION);
-    e.string(12, "windsurf");
+    e.string(12, DEVIN_CLIENT_NAME);
     e.string(2, DEVIN_EXTENSION_VERSION);
     e.string(3, token);
     e.string(4, "en");

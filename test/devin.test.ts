@@ -349,7 +349,7 @@ const baseChatParams = (baseUrl: string) => ({
   baseUrl,
 });
 
-describe("Devin Desktop client identity", () => {
+describe("Devin CLI client identity", () => {
   for (const rpc of [AUTH_PATH, CHAT_PATH, MODELS_PATH]) {
     test(`sends compatible client metadata to ${rpc.split("/").at(-1)}`, async () => {
       let captured: Uint8Array | undefined;
@@ -390,11 +390,8 @@ describe("Devin Desktop client identity", () => {
           }
           return strings;
         });
-        // Model discovery needs the Windsurf catalog; Desktop returns only a
-        // single fallback model. Authentication and chat use Desktop identity.
-        const clientName = rpc === MODELS_PATH ? "windsurf" : "devin-desktop";
-        expect(metadata[1]).toBe(clientName);
-        expect(metadata[12]).toBe(clientName);
+        expect(metadata[1]).toBe("chisel");
+        expect(metadata[12]).toBe("chisel");
         expect(metadata[3]).toBe("devin-session-token$raw-token");
         if (rpc === CHAT_PATH) expect(metadata[21]).toBe("identity-jwt");
       } finally {
