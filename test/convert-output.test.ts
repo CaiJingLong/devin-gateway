@@ -404,7 +404,7 @@ describe("OpenAI chat.completion.chunk (streaming) — output format", () => {
         .map((e) => JSON.parse(e.data))
         .find((c) => c.choices?.[0]?.delta?.tool_calls);
       expect(toolChunk.choices[0].delta.tool_calls).toEqual([
-        { id: "tc1", type: "function", function: { name: "get_weather", arguments: '{"city":"SF"}' } },
+        { index: 0, id: "tc1", type: "function", function: { name: "get_weather", arguments: '{"city":"SF"}' } },
       ]);
       // final chunk carries tool_calls finish_reason
       const finalChunk = JSON.parse(events[events.length - 1].data);
@@ -972,12 +972,12 @@ describe("Anthropic /v1/messages stream=true — output format", () => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 describe("tool_call argument accumulation across events", () => {
-  test("OpenAI non-streaming: same id across two toolcall events -> arguments replaced by the last", async () => {
+  test("OpenAI non-streaming: same id across two toolcall events -> arguments assembled", async () => {
     const upstream = startUpstream({
       chatBody: () =>
         framesBody([
-          dataFrame({ toolCalls: [{ id: "c1", name: "do", argumentsJson: '{"x":1}' }] }),
-          dataFrame({ toolCalls: [{ id: "c1", name: "do", argumentsJson: '{"x":2}' }] }),
+          dataFrame({ toolCalls: [{ id: "c1", name: "do", argumentsJson: '{"x":' }] }),
+          dataFrame({ toolCalls: [{ id: "c1", name: "do", argumentsJson: '2}' }] }),
         ]),
     });
     const { url, cleanup } = await startGateway(upstream.url.origin);
@@ -988,7 +988,7 @@ describe("tool_call argument accumulation across events", () => {
         body: chatBody([{ role: "user", content: "go" }]),
       });
       const body = await res.json();
-      // one tool_call entry, arguments replaced (not duplicated)
+      // One complete call, with argument fragments concatenated in order.
       expect(body.choices[0].message.tool_calls).toEqual([
         { id: "c1", type: "function", function: { name: "do", arguments: '{"x":2}' } },
       ]);
@@ -1028,12 +1028,12 @@ describe("tool_call argument accumulation across events", () => {
     }
   });
 
-  test("Anthropic non-streaming: same id across two toolcall events -> input replaced by the last", async () => {
+  test("Anthropic non-streaming: same id across two toolcall events -> input assembled", async () => {
     const upstream = startUpstream({
       chatBody: () =>
         framesBody([
-          dataFrame({ toolCalls: [{ id: "tu1", name: "do", argumentsJson: '{"x":1}' }] }),
-          dataFrame({ toolCalls: [{ id: "tu1", name: "do", argumentsJson: '{"x":2}' }] }),
+          dataFrame({ toolCalls: [{ id: "tu1", name: "do", argumentsJson: '{"x":' }] }),
+          dataFrame({ toolCalls: [{ id: "tu1", name: "do", argumentsJson: '2}' }] }),
         ]),
     });
     const { url, cleanup } = await startGateway(upstream.url.origin);

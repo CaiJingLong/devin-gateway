@@ -397,6 +397,21 @@ curl http://localhost:3000/v1/messages \
   -d '{"model":"claude-opus-4-8-low","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+### Tool-call streaming
+
+Chat Completions and Anthropic Messages forward tool argument fragments as
+they arrive, without waiting for the upstream response to finish. Chat
+Completions uses a stable `index` per call and sends its ID/name only in the
+first delta. Anthropic sends `input_json_delta` events within the same
+`tool_use` content block. Text and reasoning also continue streaming.
+
+Fragments can contain incomplete JSON. Wait for successful completion before
+executing a tool; malformed arguments, truncated frames, or upstream errors
+end the HTTP stream with an error instead of a success marker. Non-streaming
+responses and `chat()` return fully assembled, validated arguments.
+Direct `streamChat()` consumers must concatenate `argumentsJson`
+by the stable `toolCalls[].index` and treat any error event as a failure.
+
 ## Programmatic usage
 
 The gateway is also importable as a TypeScript library, so GitHub Actions or other scripts can call Devin directly without going through the HTTP server.

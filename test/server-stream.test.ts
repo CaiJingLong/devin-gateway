@@ -752,7 +752,7 @@ describe("handleResponses input array with array content", () => {
 });
 
 describe("handleChatCompletions non-streaming same-id toolcall merge", () => {
-  test("two frames with the same tool-call id keep a single entry whose arguments are the last frame's", async () => {
+  test("two frames with the same tool-call id assemble one complete argument object", async () => {
     const upstream = startUpstream({
       chatBody: () =>
         framesBody([
@@ -779,7 +779,7 @@ describe("handleChatCompletions non-streaming same-id toolcall merge", () => {
       const toolCalls = body.choices[0].message.tool_calls;
       expect(toolCalls.length).toBe(1);
       expect(toolCalls[0].id).toBe("call_1");
-      expect(toolCalls[0].function.arguments).toBe("1}");
+      expect(toolCalls[0].function.arguments).toBe('{"a":1}');
       expect(body.choices[0].finish_reason).toBe("tool_calls");
     } finally {
       await cleanup();

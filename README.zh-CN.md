@@ -396,6 +396,18 @@ curl http://localhost:3000/v1/messages \
   -d '{"model":"claude-opus-4-8-low","max_tokens":1024,"messages":[{"role":"user","content":"Hello"}]}'
 ```
 
+### 工具调用的流式行为
+
+Chat Completions 和 Anthropic Messages 会随到随发工具参数分片，无需等待整个
+上游响应结束。Chat Completions 为每个调用保留稳定的 `index`，仅在首个分片
+发送 ID 和名称；Anthropic 在同一个 `tool_use` 内容块中发送
+`input_json_delta`。文本和推理也继续实时输出。
+
+分片可能包含尚未完整的 JSON，应等到成功完成后再执行工具。参数无效、帧截断
+或上游报错时，HTTP 流会以错误结束，不发送正常完成标志。非流式响应和
+`chat()` 返回拼接并校验后的完整参数；直接使用 `streamChat()` 时，需要按
+`toolCalls[].index` 拼接 `argumentsJson`，并将任何错误事件视为失败。
+
 ## 以库的形式调用
 
 ```ts

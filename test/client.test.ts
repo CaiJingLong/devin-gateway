@@ -258,10 +258,7 @@ describe("chat() aggregation", () => {
     }
   });
 
-  test("overwrites arguments when a second toolcall frame shares the same id", async () => {
-    // chat() uses `existing.arguments = tc.argumentsJson` (overwrite, not
-    // concatenation). A second frame with the same id replaces the arguments
-    // rather than appending to them.
+  test("assembles arguments when a second toolcall frame shares the same id", async () => {
     const upstream = mockUpstream([
       dataFrame({
         toolCalls: [{ id: "call_1", name: "get_weather", argumentsJson: '{"a":' }],
@@ -279,8 +276,7 @@ describe("chat() aggregation", () => {
       });
       expect(result.toolCalls).toHaveLength(1);
       expect(result.toolCalls[0].id).toBe("call_1");
-      // Second frame's argumentsJson wins (overwrite semantics).
-      expect(result.toolCalls[0].arguments).toBe("1}");
+      expect(result.toolCalls[0].arguments).toBe('{"a":1}');
     } finally {
       await upstream.server.stop();
     }

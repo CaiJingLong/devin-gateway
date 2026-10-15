@@ -1,4 +1,4 @@
-import { expect, test, describe } from "bun:test";
+import { expect, test, describe, spyOn } from "bun:test";
 import { gzipSync, gunzipSync } from "node:zlib";
 
 import {
@@ -10,6 +10,7 @@ import {
 import {
   ProtoDecoder,
   decodeGetUserJwtResponse,
+  type ChatToolCall,
 } from "../src/proto.ts";
 
 // ─── Byte-construction helpers (raw protobuf wire format) ───────────────────
@@ -58,15 +59,13 @@ function encodeGetUserJwtResponseBytes(opts: {
 // GetChatMessageResponse fields:
 // 1=messageId, 3=deltaText, 5=stopReason, 6=deltaToolCalls(repeated msg),
 // 7=usage(msg), 9=deltaThinking, 10=deltaSignature
-function encodeChatToolCallBytes(tc: {
-  id: string;
-  name: string;
-  argumentsJson: string;
-}): number[] {
+function encodeChatToolCallBytes(tc: ChatToolCall): number[] {
   return [
     ...encodeString(1, tc.id),
     ...encodeString(2, tc.name),
     ...encodeString(3, tc.argumentsJson),
+    ...(tc.invalidJsonErr ? encodeString(5, tc.invalidJsonErr) : []),
+    ...(tc.isCustomToolCall !== undefined ? encodeUint32(6, Number(tc.isCustomToolCall)) : []),
   ];
 }
 
@@ -89,7 +88,7 @@ function encodeGetChatMessageResponseBytes(opts: {
   deltaThinking?: string;
   deltaSignature?: string;
   stopReason?: number;
-  toolCalls?: { id: string; name: string; argumentsJson: string }[];
+  toolCalls?: ChatToolCall[];
   usage?: {
     inputTokens: number;
     outputTokens: number;
@@ -350,6 +349,138 @@ const baseChatParams = (baseUrl: string) => ({
   baseUrl,
 });
 
+describe("streamChat tool-call assembly", () => {
+  const toolFrame = (toolCalls: ChatToolCall[]) =>
+    connectFrame(FLAG_NORMAL, encodeGetChatMessageResponseBytes({ toolCalls }));
+
+  for (const exitEvent of ["toolcall", "error"]) {
+    test(`clears the idle timer when a consumer exits on ${exitEvent}`, async () => {
+      const server = mockUpstream(exitEvent === "toolcall"
+        ? [toolFrame([{ id: "first", name: "echo", argumentsJson: "{" }])]
+        : [connectFrame(FLAG_END_STREAM, Buffer.from(JSON.stringify({ error: { code: "internal", message: "boom" } })))]);
+      const setTimer = spyOn(globalThis, "setTimeout");
+      const clearTimer = spyOn(globalThis, "clearTimeout");
+      const idleTimers = () => setTimer.mock.calls.flatMap((args, index) =>
+        args[1] === 120_000 ? [setTimer.mock.results[index].value] : []);
+      try {
+        for await (const event of streamChat(baseChatParams(server.url.origin))) {
+          if (event.type === exitEvent) break;
+        }
+        const lastTimer = idleTimers().at(-1);
+        expect(lastTimer).toBeDefined();
+        expect(clearTimer.mock.calls.some(([timer]) => timer === lastTimer)).toBe(true);
+      } finally {
+        for (const timer of idleTimers()) clearTimeout(timer);
+        setTimer.mockRestore();
+        clearTimer.mockRestore();
+        await server.stop();
+      }
+    });
+  }
+
+  for (const isCustomToolCall of [false, true]) {
+    test(`streams normalized deltas and preserves custom-tool metadata (${isCustomToolCall})`, async () => {
+      const server = mockUpstream([
+        toolFrame([{ id: "first", name: "echo", argumentsJson: "", isCustomToolCall }]),
+        toolFrame([{ id: "", name: "", argumentsJson: '{"value":' }]),
+        toolFrame([{ id: "first", name: "echo", argumentsJson: "17}" }]),
+        toolFrame([{ id: "second", name: "noop", argumentsJson: "" }]),
+      ]);
+      try {
+        const events = await collectStream(baseChatParams(server.url.origin));
+        expect(events.map((event) => event.type)).toEqual(["toolcall", "toolcall", "toolcall", "toolcall", "toolcall", "done"]);
+        expect(events.flatMap((event) => event.toolCalls ?? [])).toEqual([
+          { index: 0, id: "first", name: "echo", argumentsJson: "", isCustomToolCall },
+          { index: 0, id: "first", name: "echo", argumentsJson: '{"value":', isCustomToolCall },
+          { index: 0, id: "first", name: "echo", argumentsJson: "17}", isCustomToolCall },
+          { index: 1, id: "second", name: "noop", argumentsJson: "" },
+          { index: 1, id: "second", name: "noop", argumentsJson: "{}" },
+        ]);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+
+  test("keeps named calls without upstream IDs distinct", async () => {
+    const server = mockUpstream([
+      toolFrame([{ id: "", name: "first", argumentsJson: "" }]),
+      toolFrame([{ id: "", name: "", argumentsJson: '{"a":1}' }]),
+      toolFrame([{ id: "", name: "second", argumentsJson: "{}" }]),
+    ]);
+    try {
+      const events = await collectStream(baseChatParams(server.url.origin));
+      expect(events.flatMap((event) => event.toolCalls ?? [])).toEqual([
+        { index: 0, id: "", name: "first", argumentsJson: "" },
+        { index: 0, id: "", name: "first", argumentsJson: '{"a":1}' },
+        { index: 1, id: "", name: "second", argumentsJson: "{}" },
+      ]);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  const invalidCases: [string, ChatToolCall[]][] = [
+    ["orphan fragment", [{ id: "", name: "", argumentsJson: "}" }]],
+    ["missing name", [{ id: "bad", name: "", argumentsJson: "{}" }]],
+    ["conflicting name", [
+      { id: "bad", name: "first", argumentsJson: "{" },
+      { id: "bad", name: "second", argumentsJson: "}" },
+    ]],
+    ["upstream JSON error", [{ id: "bad", name: "echo", argumentsJson: "{}", invalidJsonErr: "bad JSON" }]],
+    ...["{", "[]", "null", "17", '"text"', "{}{}"].map((argumentsJson): [string, ChatToolCall[]] =>
+      [`invalid arguments ${argumentsJson}`, [{ id: "bad", name: "echo", argumentsJson }]]),
+  ];
+  for (const [name, deltas] of invalidCases) {
+    test(`rejects ${name} without signaling successful completion`, async () => {
+      const server = mockUpstream(deltas.map((delta) => toolFrame([delta])));
+      const events: ChatStreamEvent[] = [];
+      try {
+        await expect((async () => {
+          for await (const event of streamChat(baseChatParams(server.url.origin))) events.push(event);
+        })()).rejects.toThrow();
+        expect(events.some((event) => event.type === "done")).toBe(false);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+
+  for (const bytesToKeep of [3, 8]) {
+    test(`rejects a truncated Connect frame (${bytesToKeep} bytes) without completing calls`, async () => {
+      const argumentFrame = toolFrame([{ id: "", name: "", argumentsJson: '{"value":17}' }]);
+      const server = mockUpstream([
+        toolFrame([{ id: "first", name: "echo", argumentsJson: "" }]),
+        argumentFrame.subarray(0, bytesToKeep),
+      ]);
+      const events: ChatStreamEvent[] = [];
+      try {
+        await expect((async () => {
+          for await (const event of streamChat(baseChatParams(server.url.origin))) events.push(event);
+        })()).rejects.toThrow("Incomplete Connect frame");
+        expect(events.some((event) => event.type === "done")).toBe(false);
+        expect(events.flatMap((event) => event.toolCalls ?? []).map((call) => call.argumentsJson)).toEqual([""]);
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+
+  test("streams tool, text and thinking deltas and reports a later upstream error", async () => {
+    const server = mockUpstream([
+      toolFrame([{ id: "first", name: "echo", argumentsJson: "{}" }]),
+      connectFrame(FLAG_NORMAL, encodeGetChatMessageResponseBytes({ deltaThinking: "thinking", deltaText: "text" })),
+      connectFrame(FLAG_END_STREAM, Buffer.from(JSON.stringify({ error: { code: "internal", message: "boom" } }))),
+    ]);
+    try {
+      const events = await collectStream(baseChatParams(server.url.origin));
+      expect(events.map((event) => event.type)).toEqual(["toolcall", "text", "thinking", "error", "done"]);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 describe("streamChat", () => {
   test("single text frame yields a text event then done", async () => {
     const frame = connectFrame(
@@ -415,7 +546,7 @@ describe("streamChat", () => {
       const events = await collectStream(baseChatParams(server.url.origin));
       expect(events.map((e) => e.type)).toEqual(["toolcall", "done"]);
       expect(events[0].toolCalls).toEqual([
-        { id: "call-1", name: "search", argumentsJson: '{"q":"x"}' },
+        { index: 0, id: "call-1", name: "search", argumentsJson: '{"q":"x"}' },
       ]);
     } finally {
       await server.stop();
