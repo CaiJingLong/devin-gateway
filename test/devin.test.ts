@@ -349,6 +349,58 @@ const baseChatParams = (baseUrl: string) => ({
   baseUrl,
 });
 
+describe("Devin CLI client identity", () => {
+  for (const rpc of [AUTH_PATH, CHAT_PATH, MODELS_PATH]) {
+    test(`sends compatible client metadata to ${rpc.split("/").at(-1)}`, async () => {
+      let captured: Uint8Array | undefined;
+      const server = Bun.serve({
+        hostname: "127.0.0.1",
+        port: 0,
+        fetch: async (req) => {
+          const path = new URL(req.url).pathname;
+          if (path === rpc) captured = new Uint8Array(await req.arrayBuffer());
+          if (path === AUTH_PATH) {
+            return new Response(Uint8Array.from(encodeGetUserJwtResponseBytes({ userJwt: "identity-jwt" })));
+          }
+          if (path === CHAT_PATH) {
+            return new Response(connectFrame(FLAG_NORMAL, encodeGetChatMessageResponseBytes({ deltaText: "ok" })));
+          }
+          return new Response(new Uint8Array());
+        },
+      });
+      try {
+        if (rpc === AUTH_PATH) await getUserJwt("raw-token", server.url.origin);
+        else if (rpc === CHAT_PATH) await collectStream(baseChatParams(server.url.origin));
+        else await discoverModels("raw-token", server.url.origin);
+
+        expect(captured).toBeDefined();
+        let body = Buffer.from(captured!);
+        if (rpc === CHAT_PATH) {
+          const payload = body.subarray(5, 5 + body.readUInt32BE(1));
+          body = body[0] & FLAG_COMPRESSED ? gunzipSync(payload) : payload;
+        }
+        const decoder = new ProtoDecoder(body);
+        expect(decoder.readTag()).toEqual({ field: 1, wire: 2 });
+        const metadata = decoder.readMessage((sub) => {
+          const strings: Record<number, string> = {};
+          while (!sub.done) {
+            const { field, wire } = sub.readTag();
+            if (wire === 2) strings[field] = sub.readString();
+            else sub.skip(wire);
+          }
+          return strings;
+        });
+        expect(metadata[1]).toBe("chisel");
+        expect(metadata[12]).toBe("chisel");
+        expect(metadata[3]).toBe("devin-session-token$raw-token");
+        if (rpc === CHAT_PATH) expect(metadata[21]).toBe("identity-jwt");
+      } finally {
+        await server.stop();
+      }
+    });
+  }
+});
+
 describe("streamChat tool-call assembly", () => {
   const toolFrame = (toolCalls: ChatToolCall[]) =>
     connectFrame(FLAG_NORMAL, encodeGetChatMessageResponseBytes({ toolCalls }));

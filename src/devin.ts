@@ -37,6 +37,8 @@ import {
 const DEVIN_API_URL = "https://server.codeium.com";
 const DEVIN_AUTH_PATH = "/exa.auth_pb.AuthService/GetUserJwt";
 const CHAT_MESSAGE_PATH = "/exa.api_server_pb.ApiServerService/GetChatMessage";
+// Match the official Devin CLI identity for both chat and model discovery.
+const DEVIN_CLIENT_NAME = "chisel";
 const DEVIN_IDE_VERSION = "3.2.23";
 const DEVIN_EXTENSION_VERSION = "1.48.2";
 const SESSION_TOKEN_PREFIX = "devin-session-token$";
@@ -51,9 +53,9 @@ function normalizeToken(token: string): string {
 
 function buildMetadata(apiKey: string, userJwt?: string): Metadata {
   return {
-    ideName: "windsurf",
+    ideName: DEVIN_CLIENT_NAME,
     ideVersion: DEVIN_IDE_VERSION,
-    extensionName: "windsurf",
+    extensionName: DEVIN_CLIENT_NAME,
     extensionVersion: DEVIN_EXTENSION_VERSION,
     apiKey,
     locale: "en",
@@ -408,9 +410,9 @@ export async function discoverModels(
   const token = normalizeToken(apiKey);
   const enc = new ProtoEncoder();
   enc.message(1, (e) => {
-    e.string(1, "windsurf");
+    e.string(1, DEVIN_CLIENT_NAME);
     e.string(7, DEVIN_IDE_VERSION);
-    e.string(12, "windsurf");
+    e.string(12, DEVIN_CLIENT_NAME);
     e.string(2, DEVIN_EXTENSION_VERSION);
     e.string(3, token);
     e.string(4, "en");
