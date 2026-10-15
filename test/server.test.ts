@@ -1,5 +1,7 @@
 import { expect, test, describe } from "bun:test";
 import { gunzipSync } from "node:zlib";
+import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
 import { startServer } from "../src/server.ts";
 import { listModels } from "../src/models.ts";
@@ -165,7 +167,7 @@ function decodeChatRequestToolChoice(body: Uint8Array): { optionName?: string; t
 
 interface UpstreamOptions {
   /** Build the GetChatMessage response body. Defaults to a single "hi" frame. */
-  chatBody?: () => Uint8Array;
+  chatBody?: () => Uint8Array | ReadableStream<Uint8Array>;
   /** Return a non-ok Response for GetChatMessage instead of a frame stream. */
   chatError?: { status: number; body: string };
   /** Capture the raw GetChatMessage request body (Connect frame). */
@@ -456,6 +458,301 @@ describe("routing 404 + CORS", () => {
   });
 });
 
+// ─── Tool-call regression coverage ─────────────────────────────────────────
+
+describe("tool arguments stream before upstream completion", () => {
+  for (const endpoint of ["/v1/chat/completions", "/v1/messages"]) {
+    test(endpoint, async () => {
+      let upstreamController!: ReadableStreamDefaultController<Uint8Array>;
+      let upstreamClosed = false;
+      const upstream = startUpstream({
+        chatBody: () => new ReadableStream<Uint8Array>({
+          start(controller) {
+            upstreamController = controller;
+            controller.enqueue(dataFrame({ toolCalls: [{ id: "probe", name: "echo_probe", argumentsJson: "" }] }));
+            controller.enqueue(dataFrame({ toolCalls: [{ id: "", name: "", argumentsJson: '{"value":' }] }));
+            // The tail is withheld until the client has received this fragment.
+          },
+        }),
+      });
+      const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+      try {
+        const response = await fetch(`${url}${endpoint}`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "m", max_tokens: 100, messages: [{ role: "user", content: "probe" }], stream: true }),
+          signal: AbortSignal.timeout(1500),
+        });
+        expect(response.status).toBe(200);
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let received = "";
+        let fragment;
+        while (!fragment) {
+          const { done, value } = await reader.read();
+          expect(done).toBe(false);
+          received += decoder.decode(value, { stream: true });
+          const complete = received.slice(0, received.lastIndexOf("\n\n") + 2);
+          fragment = parseSse(complete).filter((event) => event.data.startsWith("{"))
+            .map((event) => JSON.parse(event.data)).find((event) =>
+              endpoint === "/v1/messages"
+                ? event.delta?.partial_json === '{"value":'
+                : event.choices?.[0]?.delta?.tool_calls?.[0]?.function?.arguments === '{"value":');
+        }
+        expect(upstreamClosed).toBe(false);
+        if (endpoint === "/v1/messages") {
+          expect(fragment.index).toBe(0);
+        } else {
+          expect(fragment.choices[0].delta.tool_calls[0].index).toBe(0);
+        }
+        upstreamController.enqueue(framesBody([
+          dataFrame({ toolCalls: [{ id: "", name: "", argumentsJson: "17}" }] }),
+        ]));
+        upstreamController.close();
+        upstreamClosed = true;
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          received += decoder.decode(value, { stream: true });
+        }
+        expect(received).toContain(endpoint === "/v1/messages" ? "message_stop" : "[DONE]");
+        expect(received).not.toContain('"error"');
+      } finally {
+        if (upstreamController && !upstreamClosed) upstreamController.close();
+        await cleanup();
+        await upstream.stop();
+      }
+    });
+  }
+});
+
+describe("incremental tool-call SDK compatibility", () => {
+  for (const sdk of ["OpenAI", "Anthropic"]) {
+    test(sdk, async () => {
+      const upstream = startUpstream({
+        chatBody: () => framesBody([
+          dataFrame({ toolCalls: [{ id: "first", name: "echo", argumentsJson: "" }] }),
+          dataFrame({ toolCalls: [{ id: "", name: "", argumentsJson: '{"value":' }] }),
+          dataFrame({ toolCalls: [{ id: "first", name: "echo", argumentsJson: "17}" }] }),
+          dataFrame({ toolCalls: [{ id: "second", name: "noop", argumentsJson: "" }] }),
+          dataFrame({ toolCalls: [{ id: "third", name: "noop", argumentsJson: "" }] }),
+        ]),
+      });
+      const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+      try {
+        if (sdk === "OpenAI") {
+          const client = new OpenAI({ apiKey: "k", baseURL: `${url}/v1` });
+          const stream = client.chat.completions.stream({ model: "m", messages: [{ role: "user", content: "probe" }] });
+          const result = await stream.finalChatCompletion();
+          expect(result.choices[0].message.tool_calls).toEqual([
+            { id: "first", type: "function", function: { name: "echo", arguments: '{"value":17}' } },
+            { id: "second", type: "function", function: { name: "noop", arguments: "{}" } },
+            { id: "third", type: "function", function: { name: "noop", arguments: "{}" } },
+          ]);
+        } else {
+          const client = new Anthropic({ apiKey: "k", baseURL: url });
+          const stream = client.messages.stream({ model: "m", max_tokens: 100, messages: [{ role: "user", content: "probe" }] });
+          const completed: unknown[] = [];
+          stream.on("contentBlock", (block) => completed.push(block));
+          const result = await stream.finalMessage();
+          const expected = [
+            { type: "tool_use", id: "first", name: "echo", input: { value: 17 } },
+            { type: "tool_use", id: "second", name: "noop", input: {} },
+            { type: "tool_use", id: "third", name: "noop", input: {} },
+          ];
+          expect(result.content).toEqual(expected);
+          expect(completed).toEqual(expected);
+        }
+      } finally {
+        await cleanup();
+        await upstream.stop();
+      }
+    });
+  }
+});
+
+describe("tool stream failures never emit successful completion", () => {
+  for (const endpoint of ["/v1/chat/completions", "/v1/messages"]) {
+    for (const failure of ["incomplete JSON", "upstream error"]) {
+      test(`${endpoint}: ${failure}`, async () => {
+        const upstream = startUpstream({
+          chatBody: () => framesBody([
+            dataFrame({ toolCalls: [{ id: "probe", name: "echo", argumentsJson: "{" }] }),
+          ], failure === "upstream error" ? { error: { code: "internal", message: "boom" } } : undefined),
+        });
+        const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+        try {
+          const response = await fetch(`${url}${endpoint}`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model: "m", max_tokens: 100, messages: [{ role: "user", content: "probe" }], stream: true }),
+          });
+          const text = await response.text();
+          const events = parseSse(text).filter((event) => event.data.startsWith("{")).map((event) => JSON.parse(event.data));
+          expect(events.some((event) => event.error)).toBe(true);
+          expect(events.some((event) => event.choices?.[0]?.finish_reason === "tool_calls")).toBe(false);
+          expect(events.some((event) => ["content_block_stop", "message_stop"].includes(event.type))).toBe(false);
+          expect(text).not.toContain("[DONE]");
+        } finally {
+          await cleanup();
+          await upstream.stop();
+        }
+      });
+    }
+  }
+});
+
+describe("Chat Completions tool-call regressions (issue #1)", () => {
+  // Verify client-visible results without requiring buffered or incremental output.
+  function collectStreamedCalls(text: string) {
+    const events = parseSse(text);
+    expect(events.at(-1)?.data).toBe("[DONE]");
+    const chunks = events.filter((event) => event.data.startsWith("{"))
+      .map((event) => JSON.parse(event.data));
+    expect(chunks.at(-1)?.choices[0].finish_reason).toBe("tool_calls");
+
+    const calls = new Map<number, { id: string; type: string; function: { name: string; arguments: string } }>();
+    for (const chunk of chunks) {
+      for (const delta of chunk.choices?.[0]?.delta?.tool_calls ?? []) {
+        expect(Number.isInteger(delta.index)).toBe(true);
+        expect(delta.index).toBeGreaterThanOrEqual(0);
+        let call = calls.get(delta.index);
+        if (!call) {
+          expect(delta.id).toBeTruthy();
+          expect(delta.type).toBe("function");
+          expect(delta.function?.name).toBeTruthy();
+          call = { id: delta.id, type: delta.type, function: { name: delta.function.name, arguments: "" } };
+          calls.set(delta.index, call);
+        } else {
+          if (delta.id !== undefined) expect(delta.id).toBe(call.id);
+          if (delta.type !== undefined) expect(delta.type).toBe(call.type);
+          if (delta.function?.name !== undefined) expect(delta.function.name).toBe(call.function.name);
+        }
+        call.function.arguments += delta.function?.arguments ?? "";
+      }
+    }
+    expect([...calls.keys()]).toEqual(Array.from({ length: calls.size }, (_, index) => index));
+    return [...calls.values()];
+  }
+
+  for (const fragmentId of ["", "probe"]) {
+    for (const stream of [false, true]) {
+      test(`assembles ${fragmentId ? "repeated-ID" : "anonymous"} argument fragments (stream=${stream})`, async () => {
+        const upstream = startUpstream({
+          chatBody: () => framesBody([
+            dataFrame({ toolCalls: [{ id: "probe", name: "echo_probe", argumentsJson: "" }] }),
+            ...["{", '"value": 17', "}"].map((argumentsJson) =>
+              dataFrame({ toolCalls: [{ id: fragmentId, name: "", argumentsJson }] })),
+          ]),
+        });
+        const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+        try {
+          const response = await fetch(`${url}/v1/chat/completions`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "probe" }], stream }),
+          });
+          expect(response.status).toBe(200);
+          let calls;
+          if (stream) {
+            calls = collectStreamedCalls(await response.text());
+          } else {
+            const body = await response.json();
+            expect(body.choices[0].finish_reason).toBe("tool_calls");
+            calls = body.choices[0].message.tool_calls;
+          }
+          expect(calls).toEqual([{
+            id: "probe", type: "function",
+            function: { name: "echo_probe", arguments: '{"value": 17}' },
+          }]);
+        } finally {
+          await cleanup();
+          await upstream.stop();
+        }
+      });
+    }
+  }
+
+  test("assigns distinct indices to complete streamed calls independently of fragmentation", async () => {
+    const upstream = startUpstream({
+      chatBody: () => framesBody([
+        dataFrame({ toolCalls: [
+          { id: "first", name: "echo_probe", argumentsJson: '{"value": 17}' },
+          { id: "second", name: "echo_probe", argumentsJson: '{"value": 18}' },
+        ] }),
+      ]),
+    });
+    const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+    try {
+      const response = await fetch(`${url}/v1/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "probe" }], stream: true }),
+      });
+      expect(response.status).toBe(200);
+      expect(collectStreamedCalls(await response.text())).toEqual([
+        { id: "first", type: "function", function: { name: "echo_probe", arguments: '{"value": 17}' } },
+        { id: "second", type: "function", function: { name: "echo_probe", arguments: '{"value": 18}' } },
+      ]);
+    } finally {
+      await cleanup();
+      await upstream.stop();
+    }
+  });
+});
+
+describe("Anthropic tool-call regressions (issue #1)", () => {
+  for (const stream of [false, true]) {
+    test(`assembles anonymous fragments into one tool_use block (stream=${stream})`, async () => {
+      const upstream = startUpstream({
+        chatBody: () => framesBody([
+          dataFrame({ toolCalls: [{ id: "probe", name: "echo_probe", argumentsJson: "" }] }),
+          ...["{", '"value": 17', "}"].map((argumentsJson) =>
+            dataFrame({ toolCalls: [{ id: "", name: "", argumentsJson }] })),
+        ]),
+      });
+      const { url, cleanup } = await startGateway(upstream.url.origin, "k");
+      try {
+        const response = await fetch(`${url}/v1/messages`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ model: "m", max_tokens: 100, messages: [{ role: "user", content: "probe" }], stream }),
+        });
+        expect(response.status).toBe(200);
+        if (stream) {
+          const events = parseSse(await response.text()).map((event) => JSON.parse(event.data));
+          const starts = events.filter((event) => event.type === "content_block_start");
+          expect(starts).toEqual([{
+            type: "content_block_start", index: 0,
+            content_block: { type: "tool_use", id: "probe", name: "echo_probe", input: {} },
+          }]);
+          const deltas = events.filter((event) => event.type === "content_block_delta");
+          expect(deltas.length).toBeGreaterThan(0);
+          for (const delta of deltas) {
+            expect(delta.index).toBe(0);
+            expect(delta.delta.type).toBe("input_json_delta");
+          }
+          expect(JSON.parse(deltas.map((event) => event.delta.partial_json).join(""))).toEqual({ value: 17 });
+          expect(events.filter((event) => event.type === "content_block_stop")).toEqual([
+            { type: "content_block_stop", index: 0 },
+          ]);
+          expect(events.find((event) => event.type === "message_delta").delta.stop_reason).toBe("tool_use");
+          expect(events.at(-1).type).toBe("message_stop");
+        } else {
+          const body = await response.json();
+          expect(body.content).toEqual([
+            { type: "tool_use", id: "probe", name: "echo_probe", input: { value: 17 } },
+          ]);
+          expect(body.stop_reason).toBe("tool_use");
+        }
+      } finally {
+        await cleanup();
+        await upstream.stop();
+      }
+    });
+  }
+});
+
 // ─── POST /v1/chat/completions (non-streaming) ───────────────────────────────
 
 describe("POST /v1/chat/completions (non-streaming)", () => {
@@ -540,7 +837,6 @@ describe("POST /v1/chat/completions (non-streaming)", () => {
       await upstream.stop();
     }
   });
-
   test("streamChat error event maps to 502", async () => {
     const upstream = startUpstream({
       chatBody: () =>

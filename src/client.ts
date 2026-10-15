@@ -121,12 +121,8 @@ export async function chat(options: ChatOptions): Promise<ChatResult> {
       thinking += ev.deltaThinking;
     } else if (ev.type === "toolcall" && ev.toolCalls) {
       for (const tc of ev.toolCalls) {
-        const existing = toolCalls.find((t) => t.id === tc.id);
-        if (existing) {
-          existing.arguments = tc.argumentsJson;
-        } else {
-          toolCalls.push({ id: tc.id, name: tc.name, arguments: tc.argumentsJson });
-        }
+        const call = toolCalls[tc.index] ??= { id: tc.id, name: tc.name, arguments: "" };
+        call.arguments += tc.argumentsJson;
       }
     } else if (ev.type === "usage") {
       usage = ev.usage ?? undefined;

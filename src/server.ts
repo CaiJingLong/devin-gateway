@@ -14,7 +14,7 @@
  * only when a request omits both headers.
  */
 
-import { streamChat, discoverModels, type ChatStreamEvent } from "./devin.js";
+import { streamChat, discoverModels, type ChatStreamEvent, type ChatToolCallDelta } from "./devin.js";
 import { listModels, type ModelInfo } from "./models.js";
 import {
   openaiToInternal,
@@ -187,12 +187,8 @@ async function handleChatCompletions(req: Request, reqId: string, trace: ErrorTr
       else if (ev.type === "thinking") thinking += ev.deltaThinking;
       else if (ev.type === "toolcall" && ev.toolCalls) {
         for (const tc of ev.toolCalls) {
-          const existing = toolCalls.find((t) => t.id === tc.id);
-          if (existing) {
-            existing.arguments = tc.argumentsJson;
-          } else {
-            toolCalls.push({ id: tc.id, name: tc.name, arguments: tc.argumentsJson });
-          }
+          const call = toolCalls[tc.index] ??= { id: tc.id, name: tc.name, arguments: "" };
+          call.arguments += tc.argumentsJson;
         }
       } else if (ev.type === "usage") usage = ev.usage;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
@@ -274,6 +270,7 @@ function streamOpenAIChat(
         sentChunks++;
 
         let hasToolCalls = false;
+        const startedTools = new Set<number>();
         let stopReason = 0;
         let usage: { inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number } | null | undefined;
 
@@ -301,14 +298,17 @@ function streamOpenAIChat(
           } else if (ev.type === "toolcall" && ev.toolCalls) {
             hasToolCalls = true;
             for (const tc of ev.toolCalls) {
+              const first = !startedTools.has(tc.index);
+              startedTools.add(tc.index);
               send({
                 id: completionId, object: "chat.completion.chunk", created, model: modelId,
                 choices: [{
                   index: 0,
                   delta: {
                     tool_calls: [{
-                      id: tc.id, type: "function",
-                      function: { name: tc.name, arguments: tc.argumentsJson },
+                      index: tc.index,
+                      ...(first ? { id: tc.id || `call_${tc.index}`, type: "function" } : {}),
+                      function: { ...(first ? { name: tc.name } : {}), arguments: tc.argumentsJson },
                     }],
                   },
                   finish_reason: null,
@@ -326,6 +326,7 @@ function streamOpenAIChat(
             sentChunks++;
             slog(`upstream error: ${ev.error}`);
             trace.flush(new Error(ev.error), cls.status);
+            return;
           }
         }
         send({
@@ -692,9 +693,8 @@ async function handleAnthropicMessages(req: Request, reqId: string, trace: Error
       else if (ev.type === "thinking") thinking += ev.deltaThinking;
       else if (ev.type === "toolcall" && ev.toolCalls) {
         for (const tc of ev.toolCalls) {
-          const existing = toolCalls.find((t) => t.id === tc.id);
-          if (existing) existing.arguments = tc.argumentsJson;
-          else toolCalls.push({ id: tc.id, name: tc.name, arguments: tc.argumentsJson });
+          const call = toolCalls[tc.index] ??= { id: tc.id, name: tc.name, arguments: "" };
+          call.arguments += tc.argumentsJson;
         }
       } else if (ev.type === "usage") usage = ev.usage;
       else if (ev.type === "done") stopReason = ev.stopReason ?? 0;
@@ -771,7 +771,11 @@ function streamAnthropic(
         });
 
         let contentIndex = 0;
-        let currentBlockType: "text" | "thinking" | null = null;
+        let currentBlockType: "text" | "thinking" | "tool_use" | null = null;
+        let currentToolIndex: number | null = null;
+        let currentToolArguments = "";
+        const closedTools = new Set<number>();
+        const defaultedTools = new Set<number>();
         let hasToolCalls = false;
         let stopReason = 0;
         let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheWriteTokens = 0;
@@ -787,10 +791,39 @@ function streamAnthropic(
 
         const stopBlock = () => {
           if (currentBlockType) {
+            if (currentBlockType === "tool_use") {
+              // Never mark an incomplete tool block as ready to execute.
+              const input = JSON.parse(currentToolArguments || "{}");
+              if (input === null || typeof input !== "object" || Array.isArray(input)) {
+                throw new Error("Tool arguments must be a JSON object");
+              }
+              if (!currentToolArguments) {
+                send("content_block_delta", {
+                  type: "content_block_delta", index: contentIndex,
+                  delta: { type: "input_json_delta", partial_json: "{}" },
+                });
+                defaultedTools.add(currentToolIndex!);
+              }
+              closedTools.add(currentToolIndex!);
+              currentToolIndex = null;
+              currentToolArguments = "";
+            }
             send("content_block_stop", { type: "content_block_stop", index: contentIndex });
             contentIndex++;
             currentBlockType = null;
           }
+        };
+
+        const startToolBlock = (tc: ChatToolCallDelta) => {
+          stopBlock();
+          currentBlockType = "tool_use";
+          currentToolIndex = tc.index;
+          currentToolArguments = "";
+          const toolId = tc.id || `toolu_${crypto.randomUUID().slice(0, 12)}`;
+          send("content_block_start", {
+            type: "content_block_start", index: contentIndex,
+            content_block: { type: "tool_use", id: toolId, name: tc.name, input: {} },
+          });
         };
 
         for await (const ev of streamChat({
@@ -817,20 +850,20 @@ function streamAnthropic(
               delta: { type: "text_delta", text: ev.deltaText },
             });
           } else if (ev.type === "toolcall" && ev.toolCalls) {
-            stopBlock();
             hasToolCalls = true;
             for (const tc of ev.toolCalls) {
-              const toolId = tc.id || `toolu_${crypto.randomUUID().slice(0, 12)}`;
-              send("content_block_start", {
-                type: "content_block_start", index: contentIndex,
-                content_block: { type: "tool_use", id: toolId, name: tc.name, input: {} },
-              });
+              // finish() supplies {} for empty calls; a previous block switch
+              // may already have supplied this default and closed that block.
+              if (defaultedTools.delete(tc.index) && tc.argumentsJson === "{}") continue;
+              if (closedTools.has(tc.index)) throw new Error("Tool fragment arrived after its content block ended");
+              if (currentToolIndex !== tc.index) {
+                startToolBlock(tc);
+              }
+              currentToolArguments += tc.argumentsJson;
               send("content_block_delta", {
                 type: "content_block_delta", index: contentIndex,
                 delta: { type: "input_json_delta", partial_json: tc.argumentsJson },
               });
-              send("content_block_stop", { type: "content_block_stop", index: contentIndex });
-              contentIndex++;
             }
           } else if (ev.type === "usage" && ev.usage) {
             inputTokens = ev.usage.inputTokens;
@@ -844,6 +877,7 @@ function streamAnthropic(
             slog(`upstream error: ${ev.error}`);
             send("error", { type: "error", error: { type: cls.type, message: ev.error } });
             trace.flush(new Error(ev.error), cls.status);
+            return;
           }
         }
 

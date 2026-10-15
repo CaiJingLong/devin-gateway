@@ -12,9 +12,10 @@
 import { gzipSync, gunzipSync } from "node:zlib";
 import { log } from "./log.js";
 import { currentTrace } from "./error-trace.js";
+import { ToolCallAccumulator, type ChatToolCallDelta } from "./tool-calls.js";
+export type { ChatToolCallDelta } from "./tool-calls.js";
 import {
   type ChatMessagePrompt,
-  type ChatToolCall,
   type ChatToolChoice,
   type ChatToolDefinition,
   type CompletionConfiguration,
@@ -139,7 +140,8 @@ export interface ChatStreamEvent {
   deltaText?: string;
   deltaThinking?: string;
   deltaSignature?: string;
-  toolCalls?: ChatToolCall[];
+  /** Argument deltas with stable identity/index; concatenate argumentsJson by index. */
+  toolCalls?: ChatToolCallDelta[];
   stopReason?: number;
   usage?: GetChatMessageResponse["usage"];
   error?: string;
@@ -270,102 +272,119 @@ export async function* streamChat(params: ChatParams): AsyncGenerator<ChatStream
   let pending = Buffer.alloc(0);
   let lastStopReason = 0;
   let lastUsage: GetChatMessageResponse["usage"] = null;
+  const toolCalls = new ToolCallAccumulator();
 
-  for (;;) {
-    let done: boolean, value: Uint8Array | undefined;
-    try {
-      ({ done, value } = await reader.read());
-    } catch (err) {
-      clearTimeout(idleTimer);
-      if (chatController.signal.aborted) {
-        log.error(`[chat] stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
-        currentTrace()?.add("chat", `stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
-        throw new Error(`Devin stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
-      }
-      log.error("[chat] stream read failed:", err);
-      currentTrace()?.add("chat", "stream read failed", { error: String((err as Error).message ?? err) });
-      throw err;
-    }
-    if (!done) armIdleTimer();
-    if (value && value.length > 0) {
-      pending = Buffer.concat([pending, value]);
-    }
-
-    while (pending.length >= 5) {
-      const flag = pending[0];
-      const len = pending.readUInt32BE(1);
-      if (len > MAX_FRAME_PAYLOAD) {
+  try {
+    for (;;) {
+      let done: boolean, value: Uint8Array | undefined;
+      try {
+        ({ done, value } = await reader.read());
+      } catch (err) {
         clearTimeout(idleTimer);
-        log.error(`[chat] frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
-        currentTrace()?.add("chat", `frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
-        throw new Error(`Connect frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
+        if (chatController.signal.aborted) {
+          log.error(`[chat] stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+          currentTrace()?.add("chat", `stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+          throw new Error(`Devin stream timed out: no upstream data for ${UPSTREAM_IDLE_MS / 1000}s`);
+        }
+        log.error("[chat] stream read failed:", err);
+        currentTrace()?.add("chat", "stream read failed", { error: String((err as Error).message ?? err) });
+        throw err;
       }
-      if (pending.length < 5 + len) break;
-      const payload = pending.subarray(5, 5 + len);
-      pending = pending.subarray(5 + len);
+      if (!done) armIdleTimer();
+      if (value && value.length > 0) {
+        pending = Buffer.concat([pending, value]);
+      }
 
-      if (flag & CONNECT_END_STREAM_FLAG) {
-        const trailerBytes = flag & CONNECT_COMPRESSED_FLAG ? gunzipSync(payload) : payload;
-        const trailer = trailerBytes.toString("utf8").trim();
-        if (trailer) {
-          // Check for Connect error trailer
-          try {
-            const parsed = JSON.parse(trailer);
-            if (parsed?.error?.code) {
-              const errMsg = `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`;
-              log.error(`[chat] upstream end-stream error: ${errMsg}`);
-              currentTrace()?.add("chat", `upstream end-stream error: ${errMsg}`, { code: parsed.error.code });
-              yield {
-                type: "error",
-                error: errMsg,
-                code: parsed.error.code,
-              };
-              // Yield a terminal `done` so downstream consumers receive the
-              // accumulated stopReason and a consistent termination signal.
-              // Usage was already yielded inline as data frames arrived (the
-              // end-stream trailer is always the last frame), so it is not
-              // re-yielded here.
-              clearTimeout(idleTimer);
-              yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
-              return;
+      while (pending.length >= 5) {
+        const flag = pending[0];
+        const len = pending.readUInt32BE(1);
+        if (len > MAX_FRAME_PAYLOAD) {
+          clearTimeout(idleTimer);
+          log.error(`[chat] frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
+          currentTrace()?.add("chat", `frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
+          throw new Error(`Connect frame length ${len} exceeds ${MAX_FRAME_PAYLOAD} bytes`);
+        }
+        if (pending.length < 5 + len) break;
+        const payload = pending.subarray(5, 5 + len);
+        pending = pending.subarray(5 + len);
+
+        if (flag & CONNECT_END_STREAM_FLAG) {
+          const trailerBytes = flag & CONNECT_COMPRESSED_FLAG ? gunzipSync(payload) : payload;
+          const trailer = trailerBytes.toString("utf8").trim();
+          if (trailer) {
+            // Check for Connect error trailer
+            try {
+              const parsed = JSON.parse(trailer);
+              if (parsed?.error?.code) {
+                const errMsg = `Devin stream error ${parsed.error.code}: ${parsed.error.message ?? ""}`;
+                log.error(`[chat] upstream end-stream error: ${errMsg}`);
+                currentTrace()?.add("chat", `upstream end-stream error: ${errMsg}`, { code: parsed.error.code });
+                yield {
+                  type: "error",
+                  error: errMsg,
+                  code: parsed.error.code,
+                };
+                // Yield a terminal `done` so downstream consumers receive the
+                // accumulated stopReason and a consistent termination signal.
+                // Usage was already yielded inline as data frames arrived (the
+                // end-stream trailer is always the last frame), so it is not
+                // re-yielded here.
+                clearTimeout(idleTimer);
+                yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
+                return;
+              }
+            } catch {
+              // Non-JSON trailer — ignore
             }
-          } catch {
-            // Non-JSON trailer — ignore
+          }
+          continue;
+        }
+
+        const raw = flag & CONNECT_COMPRESSED_FLAG ? gunzipSync(payload) : payload;
+        const msg = decodeGetChatMessageResponse(raw);
+
+        if (msg.deltaText) {
+          yield { type: "text", deltaText: msg.deltaText };
+        }
+        if (msg.deltaThinking) {
+          yield {
+            type: "thinking",
+            deltaThinking: msg.deltaThinking,
+            deltaSignature: msg.deltaSignature,
+          };
+        }
+        if (msg.deltaToolCalls.length > 0) {
+          try {
+            const deltas = toolCalls.add(msg.deltaToolCalls);
+            if (deltas.length > 0) yield { type: "toolcall", toolCalls: deltas };
+          } catch (error) {
+            clearTimeout(idleTimer);
+            chatController.abort();
+            throw error;
           }
         }
-        continue;
+        if (msg.usage) {
+          lastUsage = msg.usage;
+          yield { type: "usage", usage: msg.usage };
+        }
+        if (msg.stopReason !== 0) {
+          lastStopReason = msg.stopReason;
+        }
       }
 
-      const raw = flag & CONNECT_COMPRESSED_FLAG ? gunzipSync(payload) : payload;
-      const msg = decodeGetChatMessageResponse(raw);
-
-      if (msg.deltaText) {
-        yield { type: "text", deltaText: msg.deltaText };
-      }
-      if (msg.deltaThinking) {
-        yield {
-          type: "thinking",
-          deltaThinking: msg.deltaThinking,
-          deltaSignature: msg.deltaSignature,
-        };
-      }
-      if (msg.deltaToolCalls.length > 0) {
-        yield { type: "toolcall", toolCalls: msg.deltaToolCalls };
-      }
-      if (msg.usage) {
-        lastUsage = msg.usage;
-        yield { type: "usage", usage: msg.usage };
-      }
-      if (msg.stopReason !== 0) {
-        lastStopReason = msg.stopReason;
-      }
+      if (done) break;
     }
 
-    if (done) break;
+    clearTimeout(idleTimer);
+    if (pending.length > 0) throw new Error("Incomplete Connect frame at end of stream");
+    const finalDeltas = toolCalls.finish();
+    if (finalDeltas.length > 0) yield { type: "toolcall", toolCalls: finalDeltas };
+    yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
+  } finally {
+    clearTimeout(idleTimer);
+    await reader.cancel().catch(() => {});
+    reader.releaseLock();
   }
-
-  clearTimeout(idleTimer);
-  yield { type: "done", stopReason: lastStopReason, usage: lastUsage };
 }
 
 // ─── Model discovery (optional) ──────────────────────────────────────────────
