@@ -2,6 +2,34 @@
 
 devin-gateway 的版本变更记录。0.7.0 之前的历史见 [GitHub Releases](https://github.com/CaiJingLong/devin-gateway/releases)。
 
+## 0.7.1（2026-10-15）
+
+### 修复
+
+- **工具调用参数正确拼接并保持实时输出**：修复 Cascade 匿名及重复 ID 参数分片被拆分或覆盖的问题。Chat Completions 使用稳定的工具调用 `index`，Anthropic Messages 在同一个 `tool_use` 内容块内持续输出参数增量；非流式响应与 `chat()` 返回完整且经过校验的参数。关联 [#1](https://github.com/CaiJingLong/devin-gateway/issues/1)、[#2](https://github.com/CaiJingLong/devin-gateway/pull/2)。
+- **异常流正确结束**：参数无效、Connect 帧截断或上游报错时，HTTP 流以错误结束，不发送成功结束标志；流提前退出时清理读取器和计时器。无参数工具归一化为 `{}`。
+- **统一官方 CLI 客户端标识**：认证、聊天及模型发现统一使用 `chisel`，修复部分模型报错 “This model is only in Devin Local” 的问题，同时保留完整远程模型目录。关联 [#3](https://github.com/CaiJingLong/devin-gateway/pull/3)。
+
+### 使用说明
+
+- 工具参数分片随到随发，不等待整个响应结束。直接使用 `streamChat()` 的调用方需按 `toolCalls[].index` 拼接 `argumentsJson`，并在成功完成后执行工具；任何错误事件均应视为失败。
+- README 与中文 README 补充工具调用的流式行为及错误处理说明。
+
+### 验证
+
+- 全量测试：313 pass / 17 skip / 0 fail；跳过项为需要凭据的集成测试。类型检查和构建通过。
+- 工具调用真实上游实测：直接流式调用、Chat Completions 与 Anthropic Messages 的流式及非流式路径共 5 项通过。
+- 最终客户端标识实测：模型发现返回 265 项；`gpt-6-luna-none` 和 `glm-5-2-none` 聊天成功。
+
+### 升级
+
+```sh
+docker pull ghcr.io/caijinglong/devin-gateway:0.7.1
+docker pull kikt69/devin-gateway:0.7.1
+```
+
+重新创建容器以使用新镜像。镜像支持 `linux/amd64` 和 `linux/arm64`。
+
 ## 0.7.0（2026-09-17）
 
 ### 新功能
